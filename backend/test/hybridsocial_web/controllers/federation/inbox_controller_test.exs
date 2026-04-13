@@ -95,6 +95,51 @@ defmodule HybridsocialWeb.Federation.InboxControllerTest do
 
       assert json_response(conn, 422)
     end
+
+    # Regression: the controller used to pass the merged `params` to
+    # Inbox.process, which let the route's `:id` (a local UUID) shadow the
+    # activity's own "id" field. Containment then compared the local
+    # UUID's host against the actor's host and rejected every Follow as
+    # an origin mismatch. The fix is to read conn.body_params instead;
+    # this test pins that behavior so it can't silently regress.
+    test "preserves the activity's own id when route :id is a local UUID", %{conn: conn} do
+      local = create_local_identity("inbox_id_shadow")
+      remote_actor = "https://remote.example/users/eve_shadow"
+      activity_id = "https://remote.example/activities/preserved-create-1"
+      object_id = "https://remote.example/objects/preserved-note-1"
+
+      activity = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "id" => activity_id,
+        "type" => "Create",
+        "actor" => remote_actor,
+        "object" => %{
+          "id" => object_id,
+          "type" => "Note",
+          "content" => "<p>route id must not shadow this</p>",
+          "attributedTo" => remote_actor,
+          "published" => "2026-04-13T12:00:00Z",
+          "to" => ["https://www.w3.org/ns/activitystreams#Public"]
+        }
+      }
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/activity+json")
+        |> post("/actors/#{local.id}/inbox", activity)
+
+      assert json_response(conn, 202)["status"] == "accepted"
+
+      # If the body's id was preserved, the post landed in the DB with
+      # the object id from the body (not the route's UUID).
+      assert post = Repo.get_by(Hybridsocial.Social.Post, ap_id: object_id)
+      assert post.ap_id == object_id
+      refute post.ap_id == local.id
+
+      # And dedup must remember the body's activity id, not the route id.
+      activity_hash = :crypto.hash(:sha256, activity_id) |> Base.encode16(case: :lower)
+      assert Hybridsocial.Federation.deduplicate?(activity_hash)
+    end
   end
 
   describe "POST /inbox (shared inbox)" do
