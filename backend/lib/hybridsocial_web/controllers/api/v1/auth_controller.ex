@@ -229,6 +229,7 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
       is_admin: identity.is_admin,
       show_badge: identity.show_badge,
       badges: Hybridsocial.Badges.instance_badges(identity),
+      onboarded_at: identity.onboarded_at,
       verification_tier: Hybridsocial.Premium.TierLimits.get_tier(identity),
       limits: Hybridsocial.Premium.TierLimits.limits_for(identity),
       trust_level: identity.trust_level,

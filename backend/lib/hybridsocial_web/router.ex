@@ -804,6 +804,20 @@ defmodule HybridsocialWeb.Router do
     post "/", MarkerController, :create
   end
 
+  # Stories (authenticated)
+  scope "/api/v1/stories", HybridsocialWeb.Api.V1 do
+    pipe_through [:api, :authenticated]
+
+    get "/", StoryController, :index
+    post "/", StoryController, :create
+    get "/:id", StoryController, :show
+    delete "/:id", StoryController, :delete
+    post "/:id/view", StoryController, :view
+    get "/:id/viewers", StoryController, :viewers
+    post "/:id/reactions", StoryController, :react
+    delete "/:id/reactions", StoryController, :unreact
+  end
+
   # Media proxy (public)
   scope "/proxy", HybridsocialWeb do
     pipe_through :api

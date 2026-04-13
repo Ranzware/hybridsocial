@@ -35,7 +35,9 @@ defmodule Hybridsocial.Application do
             Hybridsocial.Search.IndexWorker,
             Hybridsocial.Feeds.SignalWorker,
             # Activity expiration cleanup
-            Hybridsocial.Federation.ActivityExpirationWorker
+            Hybridsocial.Federation.ActivityExpirationWorker,
+            # Story expiry (hard-deletes expired ephemeral stories)
+            Hybridsocial.Social.StoryExpiryWorker
           ],
           else: []
         ) ++

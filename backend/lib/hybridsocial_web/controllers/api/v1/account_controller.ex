@@ -51,8 +51,18 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
       end
     end
 
+    # Mark onboarding complete (one-shot, sticky). Accepts truthy "onboarded".
+    if params["onboarded"] in [true, "true", 1, "1"] and is_nil(identity.onboarded_at) do
+      identity
+      |> Ecto.Changeset.change(onboarded_at: DateTime.utc_now() |> DateTime.truncate(:microsecond))
+      |> Hybridsocial.Repo.update()
+    end
+
     case Accounts.update_identity(identity, params) do
       {:ok, updated} ->
+        # Re-fetch so onboarded_at change above is reflected
+        updated = Hybridsocial.Repo.get!(Hybridsocial.Accounts.Identity, updated.id)
+
         conn
         |> put_status(:ok)
         |> json(serialize_identity(updated))
@@ -374,6 +384,7 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
       is_admin: identity.is_admin,
       show_badge: identity.show_badge,
       badges: Hybridsocial.Badges.instance_badges(identity),
+      onboarded_at: identity.onboarded_at,
       created_at: identity.inserted_at
     }
   end

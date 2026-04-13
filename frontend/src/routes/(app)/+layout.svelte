@@ -37,9 +37,9 @@
     subscribeToPush();
     loadFilters();
 
-    // Show onboarding for new users (no display_name set yet)
+    // Show onboarding once for brand-new users (server-persisted onboarded_at)
     const authState = get(authStore);
-    if (authState.user && !authState.user.display_name) {
+    if (authState.user && !authState.user.onboarded_at) {
       showOnboarding = true;
     }
 

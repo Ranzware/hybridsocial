@@ -4,6 +4,7 @@
   import { getHomeTimeline } from '$lib/api/timelines.js';
   import FeedList from '$lib/components/feed/FeedList.svelte';
   import FeedToggle, { type FeedTab } from '$lib/components/feed/FeedToggle.svelte';
+  import StoriesCarousel from '$lib/components/stories/StoriesCarousel.svelte';
   import {
     queuedCount,
     flushQueue,
@@ -132,6 +133,7 @@
 </svelte:head>
 
 <div class="home-page">
+  <StoriesCarousel />
   <FeedToggle active={feedType} onchange={handleFeedChange} />
 
   {#if $queuedCount > 0}

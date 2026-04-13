@@ -49,6 +49,9 @@ RUN addgroup --system app && \
 # Copy the release from the builder stage
 COPY --from=builder --chown=app:app /app/_build/prod/rel/hybridsocial ./
 
+# Ensure uploads directory exists and is writable
+RUN mkdir -p /app/uploads && chown app:app /app/uploads
+
 USER app
 
 EXPOSE 4000

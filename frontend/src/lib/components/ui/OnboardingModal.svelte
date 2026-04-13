@@ -67,6 +67,13 @@
     } catch { /* */ }
   }
 
+  async function markOnboarded() {
+    try {
+      const updated = await api.patch<Identity>('/api/v1/accounts/update_credentials', { onboarded: true });
+      setUser(updated);
+    } catch { /* */ }
+  }
+
   async function next() {
     if (step === 1) {
       await saveProfile();
@@ -75,21 +82,15 @@
     } else if (step === 2) {
       step = 3;
     } else {
-      // Mark onboarding complete
-      try {
-        await api.post('/api/v1/accounts/update_credentials', { onboarded: true });
-      } catch { /* */ }
+      await markOnboarded();
       onclose();
     }
   }
 
-  function skip() {
-    if (step < totalSteps) {
-      step++;
-      if (step === 2) loadSuggestions();
-    } else {
-      onclose();
-    }
+  async function skip() {
+    // Skip means "never show this again" — persist and close from any step.
+    await markOnboarded();
+    onclose();
   }
 </script>
 
@@ -176,7 +177,7 @@
 
     <div class="onboarding-actions">
       <button type="button" class="skip-btn" onclick={skip}>
-        {step === totalSteps ? 'Close' : 'Skip'}
+        {step === totalSteps ? 'Close' : 'Skip for now'}
       </button>
       <button type="button" class="next-btn" onclick={next}>
         {step === totalSteps ? 'Get started' : 'Continue'}

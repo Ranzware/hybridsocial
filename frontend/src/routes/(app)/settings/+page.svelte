@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { authStore, setUser } from '$lib/stores/auth.js';
   import { updateAccount, updateAvatar, updateHeader } from '$lib/api/accounts.js';
+  import { tError } from '$lib/utils/i18n.js';
   import type { Identity } from '$lib/api/types.js';
   import Avatar from '$lib/components/ui/Avatar.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
@@ -60,7 +61,7 @@
       avatarUrl = updated.avatar_url;
       setUser(updated);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to upload avatar';
+      error = err instanceof Error ? tError(err.message) : tError('media.upload_failed');
     }
   }
 
@@ -73,7 +74,7 @@
       headerUrl = updated.header_url;
       setUser(updated);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to upload header';
+      error = err instanceof Error ? tError(err.message) : tError('media.upload_failed');
     }
   }
 

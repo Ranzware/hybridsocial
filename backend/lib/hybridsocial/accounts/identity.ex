@@ -41,6 +41,7 @@ defmodule Hybridsocial.Accounts.Identity do
     field :is_name_revoked, :boolean, default: false
     field :force_bot, :boolean, default: false
     field :birthday, :date
+    field :onboarded_at, :utc_datetime_usec
 
     # Subaccount hierarchy: bots, groups, and organizations belong to a parent user
     belongs_to :parent, __MODULE__, foreign_key: :parent_identity_id
