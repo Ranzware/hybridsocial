@@ -114,6 +114,23 @@ export interface Post {
   tombstone?: { reason: string };
 }
 
+export interface PostDraft {
+  id: string;
+  content: string | null;
+  spoiler_text: string | null;
+  sensitive: boolean;
+  visibility: Post['visibility'];
+  media_ids: string[];
+  parent_id: string | null;
+  quote_id: string | null;
+  scheduled_at: string | null;
+  poll_options: string[] | null;
+  poll_multiple: boolean;
+  poll_expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BoostEntry {
   id: string;
   type: 'boost';

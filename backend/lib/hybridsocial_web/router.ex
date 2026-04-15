@@ -524,6 +524,12 @@ defmodule HybridsocialWeb.Router do
     get "/scheduled_statuses", ScheduledStatusController, :index
     put "/scheduled_statuses/:id", ScheduledStatusController, :update
     delete "/scheduled_statuses/:id", ScheduledStatusController, :delete
+
+    get "/drafts", DraftController, :index
+    get "/drafts/:id", DraftController, :show
+    post "/drafts", DraftController, :create
+    put "/drafts/:id", DraftController, :update
+    delete "/drafts/:id", DraftController, :delete
   end
 
   # Subscriptions (public plans)

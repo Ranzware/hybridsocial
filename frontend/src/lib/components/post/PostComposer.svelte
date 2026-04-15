@@ -4,7 +4,8 @@
   import { api } from '$lib/api/client.js';
   import { uploadMedia } from '$lib/api/media.js';
   import { search } from '$lib/api/search.js';
-  import type { Post, MediaAttachment, Identity } from '$lib/api/types.js';
+  import type { Post, MediaAttachment, Identity, PostDraft } from '$lib/api/types.js';
+  import { createDraft, updateDraft, getDraft, deleteDraft } from '$lib/api/drafts.js';
   import { currentUser, authStore } from '$lib/stores/auth.js';
   import EmojiPicker from './EmojiPicker.svelte';
 
@@ -77,6 +78,10 @@
       if (detail?.prefill) {
         content = detail.prefill;
       }
+      if (detail?.draftId) {
+        loadDraftById(detail.draftId);
+        return;
+      }
       openComposer();
     }
 
@@ -140,6 +145,81 @@
 
   let hasDraft = $state(false);
 
+  // Server draft state — the id of the draft we're currently editing (if any),
+  // plus a "saving" flag for the Save as draft button.
+  let activeServerDraftId: string | null = $state(null);
+  let savingServerDraft = $state(false);
+
+  // Applies a server-side PostDraft to the composer state. Called when the
+  // user clicks Resume from the drafts list page (which opens the composer
+  // via the open-composer event with a `draft` payload) or via loadDraftById.
+  function applyServerDraft(draft: PostDraft) {
+    activeServerDraftId = draft.id;
+    content = draft.content || '';
+    spoilerText = draft.spoiler_text || '';
+    showCW = !!draft.spoiler_text;
+    visibility = (draft.visibility as 'public' | 'followers' | 'direct') || 'public';
+    if (draft.scheduled_at) {
+      showSchedule = true;
+      scheduledAt = draft.scheduled_at;
+    }
+    if (draft.poll_options && draft.poll_options.length > 0) {
+      showPoll = true;
+      pollOptions = draft.poll_options;
+      pollMultiple = !!draft.poll_multiple;
+    }
+  }
+
+  async function loadDraftById(id: string) {
+    try {
+      const draft = await getDraft(id);
+      applyServerDraft(draft);
+      openComposer();
+    } catch {
+      error = 'Failed to load draft.';
+    }
+  }
+
+  async function saveAsServerDraft() {
+    if (savingServerDraft) return;
+    if (!content.trim() && uploadedMedia.length === 0) {
+      error = 'Draft needs content or media.';
+      return;
+    }
+    savingServerDraft = true;
+    error = '';
+    try {
+      const payload = {
+        content,
+        spoiler_text: showCW ? spoilerText : null,
+        sensitive: showCW,
+        visibility,
+        media_ids: uploadedMedia.map((m) => m.id),
+        parent_id: replyTo?.id ?? null,
+        quote_id: quotePost?.id ?? null,
+        scheduled_at: showSchedule && scheduledAt ? new Date(scheduledAt).toISOString() : null,
+        poll_options: showPoll ? pollOptions.filter((o) => o.trim()) : null,
+        poll_multiple: showPoll && pollMultiple,
+      };
+
+      if (activeServerDraftId) {
+        await updateDraft(activeServerDraftId, payload);
+      } else {
+        const saved = await createDraft(payload);
+        activeServerDraftId = saved.id;
+      }
+
+      // Clear the localStorage auto-save — we don't need two sources.
+      clearDraft();
+      hasDraft = false;
+      resetComposer();
+    } catch {
+      error = 'Failed to save draft. Please try again.';
+    } finally {
+      savingServerDraft = false;
+    }
+  }
+
   function openComposer() {
     isOpen = true;
     hasOpened = false;
@@ -185,6 +265,7 @@
     pollMultiple = false;
     showSchedule = false;
     scheduledAt = '';
+    activeServerDraftId = null;
   }
 
   function autoGrow() {
@@ -544,6 +625,14 @@
       // Show optimistic post immediately
       window.dispatchEvent(new CustomEvent('new-post', { detail: optimisticPost }));
       clearDraft();
+
+      // If this post was promoted from a server draft, delete the draft
+      // now that it's been published. Fire-and-forget; UI already advanced.
+      if (activeServerDraftId) {
+        const draftToDelete = activeServerDraftId;
+        deleteDraft(draftToDelete).catch(() => {});
+      }
+
       resetComposer();
 
       // Increment parent's reply count immediately
@@ -903,6 +992,19 @@
 
       <div class="composer-right">
         <span class="composer-char-count" class:over-limit={isOverLimit}>{charsRemaining}</span>
+        <button
+          type="button"
+          class="composer-save-draft"
+          disabled={savingServerDraft || loading || (!content.trim() && uploadedMedia.length === 0)}
+          onclick={saveAsServerDraft}
+          title="Save as draft"
+        >
+          {#if savingServerDraft}
+            Saving...
+          {:else}
+            {activeServerDraftId ? 'Update draft' : 'Save draft'}
+          {/if}
+        </button>
         <button
           type="button"
           class="composer-submit"
@@ -1605,6 +1707,29 @@
   }
 
   .composer-submit:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .composer-save-draft {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 150ms ease;
+  }
+
+  .composer-save-draft:hover:not(:disabled) {
+    background: var(--color-surface-hover);
+  }
+
+  .composer-save-draft:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
