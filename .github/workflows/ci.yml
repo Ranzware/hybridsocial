@@ -52,6 +52,17 @@ jobs:
       - name: Run Credo (strict)
         run: mix credo --strict
 
+  i18n:
+    name: i18n Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check translation files
+        working-directory: frontend/
+        run: node scripts/check-i18n.mjs
+
   test:
     name: Test
     runs-on: ubuntu-latest

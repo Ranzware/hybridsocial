@@ -1,0 +1,16 @@
+# Weblate project config
+# See https://docs.weblate.org/en/latest/admin/continuous.html#update-scripts
+#
+# This file lets Weblate auto-discover the translation layout when you
+# connect hosted.weblate.org (or a self-hosted instance) to this repo.
+# Docs: see backend/docs/i18n-weblate.md or frontend/src/locales/README.md
+
+[weblate "hybridsocial-web"]
+name = "HybridSocial Web"
+url = "https://github.com/qfiber/hybridsocial"
+branch = "main"
+filemask = "frontend/src/locales/*.json"
+template = "frontend/src/locales/en.json"
+new_base = "frontend/src/locales/en.json"
+file_format = "json-nested"
+new_lang = "add"
