@@ -1,8 +1,23 @@
 <script lang="ts">
+  import AppLayout from '$lib/components/layout/AppLayout.svelte';
+  import { isLoggedIn } from '$lib/stores/auth.js';
+
   let { children } = $props();
+
+  // Show the full app chrome to logged-in users; the public marketing
+  // chrome only for anonymous visitors. Same URL, two audiences.
+  let loggedIn = $state(false);
+  isLoggedIn.subscribe((v) => (loggedIn = v));
 </script>
 
-<div class="public-layout" data-sveltekit-reload>
+{#if loggedIn}
+  <AppLayout>
+    <div class="legal-in-app">
+      {@render children()}
+    </div>
+  </AppLayout>
+{:else}
+<div class="public-layout">
   <header class="public-header">
     <div class="public-header-inner">
       <a href="/" class="public-logo">
@@ -83,8 +98,20 @@
     </div>
   </footer>
 </div>
+{/if}
 
 <style>
+  /* Logged-in wrapper: match the max width other feed-style pages use. */
+  .legal-in-app {
+    max-width: var(--feed-max-width);
+    margin: 0 auto;
+    padding: var(--space-4);
+  }
+
+  :global(.legal-in-app .site-page) {
+    max-width: none;
+  }
+
   .public-layout {
     min-height: 100vh;
     display: flex;
