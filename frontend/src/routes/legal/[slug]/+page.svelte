@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { page } from '$app/state';
   import { getPublicSitePage } from '$lib/api/site-pages.js';
   import { getInstanceInfo } from '$lib/api/instance.js';
@@ -14,22 +13,42 @@
   let slug = $derived(page.params.slug);
   let isAbout = $derived(slug === 'about');
 
-  onMount(async () => {
-    try {
-      const promises: Promise<unknown>[] = [getPublicSitePage(slug!)];
-      if (slug === 'about') {
-        promises.push(getInstanceInfo());
+  // Re-fetch whenever the slug changes. SvelteKit reuses this component
+  // when navigating between /legal/privacy and /legal/terms, so onMount
+  // would only fire for the first slug.
+  $effect(() => {
+    const currentSlug = slug;
+    if (!currentSlug) return;
+
+    loading = true;
+    notFound = false;
+    sitePage = null;
+    rules = [];
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const promises: Promise<unknown>[] = [getPublicSitePage(currentSlug)];
+        if (currentSlug === 'about') {
+          promises.push(getInstanceInfo());
+        }
+        const results = await Promise.all(promises);
+        if (cancelled) return;
+        sitePage = results[0] as PublicSitePage;
+        if (currentSlug === 'about' && results[1]) {
+          rules = (results[1] as { rules: InstanceRule[] }).rules || [];
+        }
+      } catch {
+        if (!cancelled) notFound = true;
+      } finally {
+        if (!cancelled) loading = false;
       }
-      const results = await Promise.all(promises);
-      sitePage = results[0] as PublicSitePage;
-      if (slug === 'about' && results[1]) {
-        rules = (results[1] as { rules: InstanceRule[] }).rules || [];
-      }
-    } catch {
-      notFound = true;
-    } finally {
-      loading = false;
-    }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   });
 </script>
 
