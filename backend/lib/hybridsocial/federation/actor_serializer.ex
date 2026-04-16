@@ -23,7 +23,7 @@ defmodule Hybridsocial.Federation.ActorSerializer do
       "name" => identity.display_name || identity.handle,
       "summary" => identity.bio || "",
       "manuallyApprovesFollowers" => identity.is_locked || false,
-      "discoverable" => true,
+      "discoverable" => Map.get(identity, :discoverable, true),
       "inbox" => "#{actor_url}/inbox",
       "outbox" => "#{actor_url}/outbox",
       "followers" => "#{actor_url}/followers",

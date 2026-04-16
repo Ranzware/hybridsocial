@@ -68,7 +68,7 @@
       const [users, pricingData, newUsersData, trendingData] = await Promise.all([
         getPromotedUsers().catch(() => [] as PromotedUser[]),
         getPromotionPricing().catch(() => null),
-        api.get<NewUser[]>('/api/v1/directory/new').catch(() => [] as NewUser[]),
+        api.get<NewUser[]>('/api/v1/directory/new', { limit: '5' }).catch(() => [] as NewUser[]),
         api.get<{ name: string; score: number; metadata: { post_count?: number } }[]>('/api/v1/trends/tags')
           .then(tags => tags.map(t => ({ tag: t.name, count: t.metadata?.post_count ?? 0 })))
           .catch(() => [] as { tag: string; count: number }[]),
@@ -167,6 +167,7 @@
           </li>
         {/each}
       </ul>
+      <a href="/directory" class="see-more-link">See more →</a>
     </section>
   {/if}
 
@@ -484,6 +485,21 @@
   .new-user-meta {
     font-size: var(--text-xs);
     color: var(--color-on-surface-variant);
+  }
+
+  .see-more-link {
+    display: block;
+    margin-block-start: var(--space-2);
+    padding: var(--space-2) 0;
+    color: var(--color-primary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+  }
+
+  .see-more-link:hover {
+    text-decoration: underline;
   }
 
   .new-user-badge {

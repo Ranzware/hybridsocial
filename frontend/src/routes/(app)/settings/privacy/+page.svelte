@@ -9,6 +9,7 @@
   import Spinner from '$lib/components/ui/Spinner.svelte';
 
   let isLocked: boolean = $state(false);
+  let discoverable: boolean = $state(true);
   let dmPreference: string = $state('everyone');
   let groupDmOptIn: boolean = $state(false);
   let loaded = $state(false);
@@ -21,6 +22,7 @@
     const state = get(authStore);
     if (state.user) {
       isLocked = state.user.is_locked ?? false;
+      discoverable = (state.user as any).discoverable ?? true;
     }
 
     // Load default visibility from local preferences
@@ -42,7 +44,10 @@
     error = null;
     saved = false;
     try {
-      const updated = await updateAccount({ is_locked: isLocked });
+      const updated = await updateAccount({
+        is_locked: isLocked,
+        discoverable,
+      } as any);
       setUser(updated);
 
       await api.patch('/api/v1/dm_preferences', {
@@ -73,6 +78,18 @@
         <span class="setting-description">Manually approve follow requests</span>
       </div>
       <Toggle bind:checked={isLocked} name="locked" />
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">Show me in the directory</span>
+        <span class="setting-description">
+          Appear in the New Members widget and the <a href="/directory">directory</a>
+          when you're a recent signup. When off, your account is still public
+          but not promoted as a new member.
+        </span>
+      </div>
+      <Toggle bind:checked={discoverable} name="discoverable" />
     </div>
 
     <div class="setting-divider"></div>

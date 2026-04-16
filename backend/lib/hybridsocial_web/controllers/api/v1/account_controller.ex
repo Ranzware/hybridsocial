@@ -400,6 +400,7 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
       is_bot: identity.is_bot,
       is_admin: identity.is_admin,
       show_badge: identity.show_badge,
+      discoverable: identity.discoverable,
       badges: Hybridsocial.Badges.instance_badges(identity),
       verification_tier: tier,
       is_verified: tier in ["verified_starter", "verified_creator", "verified_pro"],

@@ -9,10 +9,13 @@ defmodule HybridsocialWeb.Api.V1.DirectoryController do
 
   @doc """
   GET /api/v1/directory/new — Returns recently joined & confirmed users.
-  Only shows local, non-suspended, non-bot identities with confirmed email.
+
+  Only shows local, non-suspended, non-shadow-banned, non-bot identities
+  with a confirmed email AND `discoverable = true` (user has not opted
+  out of directory listings). Default limit 5, clamped to 50.
   """
   def new_users(conn, params) do
-    limit = min(parse_int(params["limit"], 8), 20)
+    limit = min(parse_int(params["limit"], 5), 50)
 
     users =
       Identity
@@ -20,6 +23,7 @@ defmodule HybridsocialWeb.Api.V1.DirectoryController do
       |> where([i], is_nil(i.deleted_at))
       |> where([i], i.is_suspended == false)
       |> where([i], i.is_shadow_banned == false)
+      |> where([i], i.discoverable == true)
       |> where([i], is_nil(i.parent_identity_id))
       |> join(:inner, [i], u in User, on: u.identity_id == i.id)
       |> where([i, u], not is_nil(u.confirmed_at))

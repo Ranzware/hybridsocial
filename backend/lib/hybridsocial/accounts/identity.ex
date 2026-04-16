@@ -43,6 +43,12 @@ defmodule Hybridsocial.Accounts.Identity do
     field :birthday, :date
     field :onboarded_at, :utc_datetime_usec
 
+    # Whether this identity appears in public directory listings (new-users
+    # widget, /directory page, AP actor discoverable flag). Default true —
+    # opt-out, not opt-in. Users who want privacy can toggle it off in
+    # settings.
+    field :discoverable, :boolean, default: true
+
     # Subaccount hierarchy: bots, groups, and organizations belong to a parent user
     belongs_to :parent, __MODULE__, foreign_key: :parent_identity_id
     has_many :children, __MODULE__, foreign_key: :parent_identity_id
@@ -79,7 +85,8 @@ defmodule Hybridsocial.Accounts.Identity do
     :metadata,
     :is_locked,
     :show_badge,
-    :birthday
+    :birthday,
+    :discoverable
   ]
 
   # Subaccounts can also toggle is_bot
