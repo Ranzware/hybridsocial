@@ -352,6 +352,7 @@ export interface PaginatedResponse<T> {
 export interface ApiErrorBody {
   error: string;
   error_description?: string;
+  message?: string;
   details?: Record<string, string[]>;
 }
 

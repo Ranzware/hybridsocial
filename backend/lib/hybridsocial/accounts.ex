@@ -784,19 +784,65 @@ defmodule Hybridsocial.Accounts do
   end
 
   @doc """
-  Admin-only: triggers the normal password-reset email flow for a
-  local user identified by identity_id (rather than email). Returns
-  `{:ok, :sent}` on success or `{:error, :not_found}` if the user
-  has no email on file.
+  Admin-only: sends a password-reset email to a local user identified
+  by identity_id. Unlike `request_password_reset/1` (the public-facing
+  version, which intentionally swallows errors and always returns
+  `:sent` to avoid leaking whether an email exists), this one surfaces
+  real delivery failures — the admin needs to know whether the mail
+  actually went out.
+
+  Returns:
+    * `{:ok, :sent}` — token generated and handed off to the Mailer.
+    * `{:error, :not_found}` — no local user / no email on file.
+    * `{:error, :email_not_configured}` — the Mailer is on the Local /
+      Test adapter, which means the operator hasn't wired SMTP or
+      Resend and the email would be silently discarded.
+    * `{:error, {:delivery_failed, reason}}` — the adapter tried and
+      returned an error.
   """
   def admin_send_password_reset_email(identity_id) do
     case get_user_by_identity(identity_id) do
-      %User{email: email} when is_binary(email) and email != "" ->
-        request_password_reset(email)
-        {:ok, :sent}
+      %User{email: email} = user when is_binary(email) and email != "" ->
+        case check_email_configured() do
+          :ok -> deliver_reset_email(user)
+          {:error, _} = err -> err
+        end
 
       _ ->
         {:error, :not_found}
+    end
+  end
+
+  defp deliver_reset_email(user) do
+    token = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+    hashed = User.hash_token(token)
+
+    user
+    |> Ecto.Changeset.change(
+      reset_token: hashed,
+      reset_token_at: DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    )
+    |> Repo.update()
+
+    email_user = %{user | reset_token: token}
+
+    case email_user
+         |> Hybridsocial.Emails.password_reset_email()
+         |> Hybridsocial.Mailer.deliver() do
+      {:ok, _} -> {:ok, :sent}
+      {:error, reason} -> {:error, {:delivery_failed, reason}}
+    end
+  end
+
+  # The Local and Test adapters pretend to deliver but drop the mail on
+  # the floor — treat them as "not configured" so the admin gets a
+  # clear error instead of a misleading success.
+  defp check_email_configured do
+    case Application.get_env(:hybridsocial, Hybridsocial.Mailer, [])[:adapter] do
+      Swoosh.Adapters.Local -> {:error, :email_not_configured}
+      Swoosh.Adapters.Test -> {:error, :email_not_configured}
+      nil -> {:error, :email_not_configured}
+      _ -> :ok
     end
   end
 

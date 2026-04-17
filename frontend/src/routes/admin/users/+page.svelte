@@ -258,8 +258,13 @@
     try {
       await sendUserPasswordResetEmail(user.id);
       addToast(`Password reset email sent to @${user.handle}`, 'success');
-    } catch {
-      addToast('Failed to send password reset email', 'error');
+    } catch (e: any) {
+      // Backend returns a message for the useful cases
+      // (email.not_configured, email.delivery_failed) — surface it so
+      // the admin understands why nothing was sent instead of staring
+      // at a generic "failed" toast.
+      const msg = e?.body?.message || e?.message || 'Failed to send password reset email';
+      addToast(msg, 'error');
     }
   }
 

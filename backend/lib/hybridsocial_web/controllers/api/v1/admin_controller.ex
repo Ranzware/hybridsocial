@@ -3205,6 +3205,24 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
               conn
               |> put_status(:not_found)
               |> json(%{error: "account.email_not_on_file"})
+
+            {:error, :email_not_configured} ->
+              conn
+              |> put_status(:unprocessable_entity)
+              |> json(%{
+                error: "email.not_configured",
+                message:
+                  "Email delivery is not configured on this instance. Set SMTP or Resend credentials under Admin → Email."
+              })
+
+            {:error, {:delivery_failed, reason}} ->
+              conn
+              |> put_status(:bad_gateway)
+              |> json(%{
+                error: "email.delivery_failed",
+                message:
+                  "The mail server rejected the send: #{inspect(reason)}. Check Admin → Email configuration."
+              })
           end
       end
     else
