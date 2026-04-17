@@ -14,6 +14,24 @@
     generateRecoveryCode,
     deleteRecoveryCode,
   } from '$lib/api/recovery.js';
+  import {
+    isWarningDisabled,
+    setWarningDisabled,
+    clearTrustedDomains,
+  } from '$lib/utils/external-link-trust.js';
+
+  // --- External link warning ---
+  let externalLinkWarningEnabled = $state(true);
+
+  function toggleExternalLinkWarning() {
+    externalLinkWarningEnabled = !externalLinkWarningEnabled;
+    setWarningDisabled(!externalLinkWarningEnabled);
+  }
+
+  function clearTrustedSites() {
+    clearTrustedDomains();
+    addToast('Trusted sites cleared', 'success');
+  }
 
   // --- Recovery code ---
   let recoveryStatus = $state<{
@@ -48,11 +66,14 @@
       recoveryPassword = '';
       await loadRecoveryStatus();
     } catch (e: unknown) {
-      const err = e as { body?: { error?: string } };
+      const err = e as { body?: { error?: string; message?: string } };
       recoveryError =
         err?.body?.error === 'auth.invalid_password'
           ? 'That password didn\u2019t match.'
-          : 'Failed to generate a code.';
+          : err?.body?.error === 'recovery.two_factor_required'
+            ? err?.body?.message ||
+              'Enable two-factor authentication before generating a recovery code.'
+            : 'Failed to generate a code.';
     } finally {
       recoveryGenerating = false;
     }
@@ -178,6 +199,7 @@
   onMount(async () => {
     const state = get(authStore);
     twoFactorEnabled = !!(state.user as any)?.two_factor_enabled;
+    externalLinkWarningEnabled = !isWarningDisabled();
     loadKeys();
     loadRecoveryStatus();
   });
@@ -570,6 +592,16 @@
             <button type="button" class="btn btn-primary" onclick={dismissNewCode}>I saved it</button>
           </div>
         </div>
+      {:else if !twoFactorEnabled}
+        <div class="recovery-state off">
+          <strong>Enable two-factor authentication first.</strong>
+          <span class="recovery-state-meta">
+            Recovery codes are only useful as a second factor — if
+            anyone with just your password could use one, the code
+            would be a downgrade, not a recovery path. Turn on 2FA
+            above and the generator will unlock here.
+          </span>
+        </div>
       {:else}
         <div class="recovery-status">
           {#if recoveryStatus?.enabled}
@@ -636,6 +668,69 @@
               {/if}
             </div>
           </div>
+        </div>
+      {/if}
+    </div>
+  </section>
+
+  <!-- External link warning -->
+  <section class="stitch-section">
+    <div class="stitch-section-heading">
+      <span class="stitch-section-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      </span>
+      <div>
+        <h2 class="stitch-section-title">External link warning</h2>
+        <p class="stitch-section-desc">
+          Pop a confirmation dialog before opening links that lead off
+          HybridSocial. Helps catch typosquatted phishing domains
+          before you visit them.
+        </p>
+      </div>
+    </div>
+
+    <div class="stitch-section-body">
+      <div class="ext-link-row">
+        <div class="ext-link-info">
+          <span class="ext-link-label">Warn before opening external links</span>
+          <span class="ext-link-meta">
+            {externalLinkWarningEnabled
+              ? 'On — every off-site link prompts before navigating.'
+              : 'Off — links open immediately. Re-enable any time.'}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="ext-link-toggle"
+          class:on={externalLinkWarningEnabled}
+          aria-pressed={externalLinkWarningEnabled}
+          aria-label="Toggle external link warning"
+          onclick={toggleExternalLinkWarning}
+        >
+          <span class="ext-link-knob"></span>
+        </button>
+      </div>
+
+      {#if externalLinkWarningEnabled}
+        <div class="ext-link-row" style="margin-block-start: 12px;">
+          <div class="ext-link-info">
+            <span class="ext-link-label">Trusted sites</span>
+            <span class="ext-link-meta">
+              Sites you've checked "Don't warn me again" for. Entries
+              expire after 24 hours automatically.
+            </span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost-danger"
+            onclick={clearTrustedSites}
+          >
+            Clear all
+          </button>
         </div>
       {/if}
     </div>
@@ -726,6 +821,65 @@
   .recovery-error {
     color: var(--color-danger, #b00);
     font-size: var(--text-sm);
+  }
+
+  /* ---- External link warning ---- */
+  .ext-link-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    padding: var(--space-3) 0;
+  }
+
+  .ext-link-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ext-link-label {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .ext-link-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    line-height: 1.5;
+  }
+
+  .ext-link-toggle {
+    flex-shrink: 0;
+    width: 44px;
+    height: 24px;
+    border-radius: 9999px;
+    border: none;
+    background: var(--color-border);
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+  }
+
+  .ext-link-toggle.on {
+    background: var(--color-success, #16a34a);
+  }
+
+  .ext-link-knob {
+    position: absolute;
+    top: 2px;
+    inset-inline-start: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: inset-inline-start 0.2s ease;
+  }
+
+  .ext-link-toggle.on .ext-link-knob {
+    inset-inline-start: 22px;
   }
 
   /* ---- Page layout ---- */

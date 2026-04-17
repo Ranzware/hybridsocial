@@ -19,7 +19,12 @@ defmodule Hybridsocial.Federation.ActivityBuilderTest do
       post = Hybridsocial.Repo.preload(post, :identity)
       activity = ActivityBuilder.build_create(post)
 
-      assert activity["@context"] == "https://www.w3.org/ns/activitystreams"
+      # Per spec: @context must be an array (or single object), not a
+      # bare string. Mastodon's strict JSON-LD parser rejects scalar
+      # strings; keep this as a contract test so we never regress.
+      assert is_list(activity["@context"])
+      assert "https://www.w3.org/ns/activitystreams" in activity["@context"]
+      assert "https://w3id.org/security/v1" in activity["@context"]
       assert activity["type"] == "Create"
       assert activity["actor"] == "http://localhost:4002/actors/#{identity.id}"
       assert String.contains?(activity["id"], "/activities/#{identity.id}/create/#{post.id}/")

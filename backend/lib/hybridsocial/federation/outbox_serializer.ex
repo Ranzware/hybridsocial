@@ -34,7 +34,7 @@ defmodule Hybridsocial.Federation.OutboxSerializer do
     outbox_url = "#{base_url()}/actors/#{identity.id}/outbox"
 
     %{
-      "@context" => "https://www.w3.org/ns/activitystreams",
+      "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
       "id" => outbox_url,
       "type" => "OrderedCollection",
       "totalItems" => total,
@@ -66,7 +66,7 @@ defmodule Hybridsocial.Federation.OutboxSerializer do
     activities = Enum.map(posts, &ActivityBuilder.build_create/1)
 
     result = %{
-      "@context" => "https://www.w3.org/ns/activitystreams",
+      "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
       "id" => "#{outbox_url}?page=#{page}",
       "type" => "OrderedCollectionPage",
       "partOf" => outbox_url,

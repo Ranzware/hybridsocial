@@ -2,6 +2,7 @@
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
 	import Analytics from '$lib/components/ui/Analytics.svelte';
+	import ExternalLinkWarning from '$lib/components/ui/ExternalLinkWarning.svelte';
 	import { onMount } from 'svelte';
 	import { initAuth } from '$lib/stores/auth.js';
 	import { initializeI18n, isRtl } from '$lib/stores/i18n.js';
@@ -45,4 +46,5 @@
 </svelte:head>
 
 <Analytics />
+<ExternalLinkWarning />
 {@render children()}

@@ -21,6 +21,22 @@ else
   echo "[secrets] SECRET_KEY_BASE generated and saved to $ENV_FILE"
 fi
 
+# ---- CrowdSec → Caddy bouncer key ----
+if grep -q "^CROWDSEC_BOUNCER_CADDY_KEY=." "$ENV_FILE" 2>/dev/null; then
+  echo "[secrets] CROWDSEC_BOUNCER_CADDY_KEY already set in $ENV_FILE, skipping."
+else
+  echo "[secrets] Generating CROWDSEC_BOUNCER_CADDY_KEY..."
+  BOUNCER_KEY=$(openssl rand -hex 32)
+  if grep -q "^CROWDSEC_BOUNCER_CADDY_KEY=" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^CROWDSEC_BOUNCER_CADDY_KEY=.*|CROWDSEC_BOUNCER_CADDY_KEY=$BOUNCER_KEY|" "$ENV_FILE"
+  else
+    echo "" >> "$ENV_FILE"
+    echo "# CrowdSec bouncer key (auto-generated, do not delete)" >> "$ENV_FILE"
+    echo "CROWDSEC_BOUNCER_CADDY_KEY=$BOUNCER_KEY" >> "$ENV_FILE"
+  fi
+  echo "[secrets] CROWDSEC_BOUNCER_CADDY_KEY generated and saved to $ENV_FILE"
+fi
+
 # ---- Instance actor keys ----
 if grep -q "^INSTANCE_PUBLIC_KEY=." "$ENV_FILE" 2>/dev/null; then
   echo "[keys] Instance keys already exist in $ENV_FILE, skipping generation."

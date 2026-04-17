@@ -1,16 +1,20 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { browser } from '$app/environment';
-  import { get } from 'svelte/store';
   import { authStore } from '$lib/stores/auth.js';
-  import { onMount } from 'svelte';
 
-  onMount(() => {
-    const state = get(authStore);
-    if (state.user) {
-      goto('/home', { replaceState: true });
-    } else {
-      goto('/login', { replaceState: true });
-    }
+  // Wait until the root layout's initAuth() resolves before picking
+  // a destination — reading authStore synchronously on mount sends
+  // every visitor to /login even when they have a valid session
+  // cookie, because initialized is still false at that point.
+  let decided = false;
+  $effect(() => {
+    if (!browser || decided) return;
+    const unsub = authStore.subscribe((state) => {
+      if (!state.initialized || decided) return;
+      decided = true;
+      goto(state.user ? '/home' : '/login', { replaceState: true });
+      queueMicrotask(() => unsub());
+    });
   });
 </script>

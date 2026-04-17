@@ -3,6 +3,7 @@ defmodule Hybridsocial.Messaging do
   The Messaging context. Manages conversations, messages, and DM preferences.
   """
   import Ecto.Query
+  require Logger
 
   alias Hybridsocial.Repo
 
@@ -24,7 +25,8 @@ defmodule Hybridsocial.Messaging do
   @doc "Find an existing direct conversation between two identities, or create one."
   def find_or_create_direct(sender_id, recipient_id) do
     with :ok <- check_not_self(sender_id, recipient_id),
-         :ok <- check_can_dm(sender_id, recipient_id) do
+         :ok <- check_can_dm(sender_id, recipient_id),
+         :ok <- check_peer_supports_dm(recipient_id) do
       case find_direct_conversation(sender_id, recipient_id) do
         %Conversation{} = conv ->
           {:ok, conv}
@@ -32,6 +34,40 @@ defmodule Hybridsocial.Messaging do
         nil ->
           create_direct_conversation(sender_id, recipient_id)
       end
+    end
+  end
+
+  # DMs across the fediverse only work where the peer software speaks
+  # a real chat primitive (ChatMessage). For everyone else — Mastodon,
+  # Misskey, unknown — we surface `{:error, :dm_not_supported, ...}`
+  # so the caller can fall back to a direct-visibility post. The
+  # tuple carries the recipient's ap_actor_url + handle so the
+  # frontend can compose the fallback post without re-fetching.
+  defp check_peer_supports_dm(recipient_id) do
+    case Repo.get(Hybridsocial.Accounts.Identity, recipient_id) do
+      nil ->
+        {:error, :recipient_not_found}
+
+      %Hybridsocial.Accounts.Identity{ap_actor_url: nil} ->
+        # Local recipient — always supported.
+        :ok
+
+      %Hybridsocial.Accounts.Identity{ap_actor_url: url} = identity ->
+        if identity_is_local?(identity) do
+          :ok
+        else
+          if Hybridsocial.Federation.NodeInfo.chat_capable?(url) do
+            :ok
+          else
+            {:error, :dm_not_supported,
+             %{
+               recipient_id: recipient_id,
+               ap_actor_url: url,
+               handle: identity.handle,
+               display_name: identity.display_name
+             }}
+          end
+        end
     end
   end
 
@@ -61,11 +97,16 @@ defmodule Hybridsocial.Messaging do
 
   defp create_direct_conversation(sender_id, recipient_id) do
     now = DateTime.utc_now()
+    is_local = identity_is_local?(sender_id) and identity_is_local?(recipient_id)
 
     Ecto.Multi.new()
     |> Ecto.Multi.insert(
       :conversation,
-      Conversation.changeset(%Conversation{}, %{type: "direct"})
+      Conversation.changeset(%Conversation{}, %{
+        type: "direct",
+        accepted: true,
+        is_local: is_local
+      })
     )
     |> Ecto.Multi.insert(:participant_sender, fn %{conversation: conv} ->
       Participant.changeset(%Participant{}, %{
@@ -91,6 +132,18 @@ defmodule Hybridsocial.Messaging do
     end
   end
 
+  defp identity_is_local?(%Hybridsocial.Accounts.Identity{} = identity),
+    do: Hybridsocial.Federation.LocalUrl.local_identity?(identity)
+
+  defp identity_is_local?(identity_id) when is_binary(identity_id) do
+    case Repo.get(Hybridsocial.Accounts.Identity, identity_id) do
+      nil -> false
+      identity -> Hybridsocial.Federation.LocalUrl.local_identity?(identity)
+    end
+  end
+
+  defp identity_is_local?(_), do: false
+
   @doc "Create a group DM with multiple participants."
   def create_group_dm(creator_id, participant_ids) when is_list(participant_ids) do
     all_ids = Enum.uniq([creator_id | participant_ids])
@@ -104,7 +157,7 @@ defmodule Hybridsocial.Messaging do
         Ecto.Multi.new()
         |> Ecto.Multi.insert(
           :conversation,
-          Conversation.changeset(%Conversation{}, %{type: "group_dm"})
+          Conversation.changeset(%Conversation{}, %{type: "group_dm", accepted: true})
         )
 
       multi =
@@ -140,7 +193,7 @@ defmodule Hybridsocial.Messaging do
 
       conversation ->
         if participant?(id, identity_id) do
-          {:ok, Repo.preload(conversation, [:participants])}
+          {:ok, conversation |> Repo.preload([:participants]) |> annotate(identity_id)}
         else
           {:error, :not_found}
         end
@@ -161,6 +214,161 @@ defmodule Hybridsocial.Messaging do
     |> offset(^offset)
     |> preload([:participants])
     |> Repo.all()
+    |> Enum.map(&annotate(&1, identity_id))
+  end
+
+  # Populates the virtual `last_message` and `unread_count` fields on a
+  # conversation struct. Called from list/get so the inbox can render
+  # preview + badge without an extra round-trip per conversation.
+  defp annotate(%Conversation{} = conversation, identity_id) do
+    last_message =
+      Message
+      |> where([m], m.conversation_id == ^conversation.id and is_nil(m.deleted_at))
+      |> order_by([m], desc: m.created_at)
+      |> limit(1)
+      |> Repo.one()
+      |> case do
+        nil -> nil
+        msg -> decrypt_message(msg)
+      end
+
+    unread_count = unread_count_for(conversation.id, identity_id)
+
+    %{conversation | last_message: last_message, unread_count: unread_count}
+  end
+
+  defp unread_count_for(conversation_id, identity_id) do
+    participant =
+      Participant
+      |> where(
+        [p],
+        p.conversation_id == ^conversation_id and p.identity_id == ^identity_id and
+          is_nil(p.left_at)
+      )
+      |> Repo.one()
+
+    case participant do
+      nil ->
+        0
+
+      %Participant{last_read_message_id: nil} ->
+        Message
+        |> where([m], m.conversation_id == ^conversation_id and is_nil(m.deleted_at))
+        |> where([m], m.sender_id != ^identity_id)
+        |> Repo.aggregate(:count, :id)
+
+      %Participant{last_read_message_id: last_read_id} ->
+        last_read_at =
+          Message
+          |> where([m], m.id == ^last_read_id)
+          |> select([m], m.created_at)
+          |> Repo.one()
+
+        case last_read_at do
+          nil ->
+            0
+
+          dt ->
+            Message
+            |> where([m], m.conversation_id == ^conversation_id and is_nil(m.deleted_at))
+            |> where([m], m.sender_id != ^identity_id)
+            |> where([m], m.created_at > ^dt)
+            |> Repo.aggregate(:count, :id)
+        end
+    end
+  end
+
+  @doc """
+  Delete a conversation from the caller's view.
+
+  Mechanically the same primitive as `leave_conversation/2` (sets
+  the participant's `left_at`), but works for both direct and group
+  DMs and sends no notification to the other participants. The
+  conversation row + messages stay so the other side keeps their
+  copy until they too delete it; periodic sweeper hard-deletes
+  conversations once all participants have left_at set.
+  """
+  def delete_conversation(conversation_id, identity_id) do
+    Participant
+    |> where(
+      [p],
+      p.conversation_id == ^conversation_id and p.identity_id == ^identity_id and
+        is_nil(p.left_at)
+    )
+    |> Repo.one()
+    |> case do
+      nil ->
+        {:error, :not_found}
+
+      participant ->
+        case participant
+             |> Ecto.Changeset.change(left_at: DateTime.utc_now())
+             |> Repo.update() do
+          {:ok, _} = ok ->
+            # On remote peers each DM is stored as a Status (Mastodon has
+            # no concept of conversation-level delete). Fan out a Delete
+            # activity for every message this user sent in the thread so
+            # the remote side's inbox mirrors our "conversation gone".
+            fan_out_dm_deletes(conversation_id, identity_id)
+            ok
+
+          err ->
+            err
+        end
+    end
+  end
+
+  # Fires a Delete{Tombstone} activity for each local message the caller
+  # sent in this conversation, to every remote participant. Fire-and-
+  # forget — we don't block the delete response on federation.
+  defp fan_out_dm_deletes(conversation_id, identity_id) do
+    sender = Repo.get(Hybridsocial.Accounts.Identity, identity_id)
+
+    if sender && is_binary(sender.private_key) do
+      messages =
+        Message
+        |> where(
+          [m],
+          m.conversation_id == ^conversation_id and m.sender_id == ^identity_id and
+            is_nil(m.deleted_at) and not is_nil(m.ap_id)
+        )
+        |> Repo.all()
+
+      remote_participants =
+        Participant
+        |> where([p], p.conversation_id == ^conversation_id and p.identity_id != ^identity_id)
+        |> join(:inner, [p], i in Hybridsocial.Accounts.Identity, on: i.id == p.identity_id)
+        |> where([p, i], not is_nil(i.ap_actor_url))
+        |> select([p, i], i)
+        |> Repo.all()
+        |> Enum.reject(&identity_is_local?/1)
+
+      for message <- messages, recipient <- remote_participants do
+        activity = build_dm_delete(sender, recipient, message)
+        Hybridsocial.Federation.Publisher.publish(activity, sender)
+      end
+    end
+  end
+
+  defp build_dm_delete(sender, recipient, message) do
+    base = HybridsocialWeb.Endpoint.url()
+    sender_url = "#{base}/actors/#{sender.id}"
+    activity_id = "#{base}/activities/#{sender.id}/delete-dm/#{message.id}"
+
+    %{
+      "@context" => [
+        "https://www.w3.org/ns/activitystreams",
+        "https://w3id.org/security/v1"
+      ],
+      "id" => activity_id,
+      "type" => "Delete",
+      "actor" => sender_url,
+      "to" => [recipient.ap_actor_url],
+      # Tombstone: per AS, a Delete of a note should reference the note
+      # URL. Mastodon accepts both a string URI and a Tombstone object;
+      # the string form is simpler and what most servers emit.
+      "object" => message.ap_id
+    }
   end
 
   @doc "Leave a conversation (group DMs only)."
@@ -232,10 +440,293 @@ defmodule Hybridsocial.Messaging do
     else
       now = DateTime.utc_now()
 
+      # Capture the plaintext before we replace it with ciphertext in
+      # the encrypted_attrs — federation to remote participants needs
+      # the cleartext. Mastodon + friends don't speak our at-rest
+      # cipher, and DMs with remote users are explicitly not E2EE
+      # (the UI warns about this too).
+      plaintext = attrs["content"] || ""
+
+      # Allocate the message ID up-front so we can derive its AP URL
+      # and persist it in the same insert. The URL is what outbound
+      # Create activities embed as `object.id` and is what later
+      # messages in the same thread reference via `inReplyTo`.
+      message_id = Ecto.UUID.generate()
+      ap_id = "#{HybridsocialWeb.Endpoint.url()}/dm/#{message_id}"
+
       with {:ok, encrypted_attrs} <- encrypt_message_attrs(conversation_id, sender_id, attrs) do
-        do_send_message(conversation_id, sender_id, encrypted_attrs, now)
+        encrypted_attrs =
+          encrypted_attrs
+          |> Map.put("id", message_id)
+          |> Map.put("ap_id", ap_id)
+
+        case do_send_message(conversation_id, sender_id, encrypted_attrs, now) do
+          {:ok, message} = result ->
+            maybe_federate_dm(conversation_id, sender_id, message, plaintext)
+            result
+
+          other ->
+            other
+        end
       end
     end
+  end
+
+  # Delivers a Direct Create{Note} activity to every remote participant
+  # in the conversation. Fire-and-forget — delivery failures log but
+  # don't fail the local send. For a 1-on-1 or group DM with ONLY
+  # local participants, this is a no-op.
+  defp maybe_federate_dm(conversation_id, sender_id, message, plaintext) do
+    sender = Hybridsocial.Repo.get(Hybridsocial.Accounts.Identity, sender_id)
+
+    if sender && is_binary(sender.private_key) do
+      remote_participants =
+        Participant
+        |> where([p], p.conversation_id == ^conversation_id and is_nil(p.left_at))
+        |> where([p], p.identity_id != ^sender_id)
+        |> join(:inner, [p], i in Hybridsocial.Accounts.Identity,
+          on: i.id == p.identity_id
+        )
+        |> where([p, i], not is_nil(i.ap_actor_url))
+        |> select([p, i], i)
+        |> Repo.all()
+
+      Enum.each(remote_participants, fn recipient ->
+        activity = build_dm_activity(sender, recipient, message, plaintext)
+        # Route through `publish/2` instead of `deliver/3` so DM
+        # delivery rides the same retry queue as posts. Transient
+        # peer failures (502, connection reset) now retry with
+        # backoff instead of dropping the message on first error.
+        Hybridsocial.Federation.Publisher.publish(activity, sender)
+      end)
+    end
+  end
+
+  @doc """
+  Ingests a DM received from a remote actor via ActivityPub. Finds or
+  creates the direct conversation between sender and local recipient,
+  encrypts the plaintext, and inserts the message with `is_local: false`
+  so the UI surfaces the "federated / not encrypted" warning.
+
+  Unlike `send_message/3`, this path does NOT re-federate — the sender
+  is remote and already delivered to every other peer.
+  """
+  def ingest_remote_dm(
+        %Hybridsocial.Accounts.Identity{} = sender,
+        %Hybridsocial.Accounts.Identity{} = recipient,
+        attrs
+      ) do
+    plaintext = Map.get(attrs, :content, "")
+    remote_ap_id = Map.get(attrs, :ap_id)
+
+    # Idempotency: Mastodon retries deliveries on 5xx/network errors,
+    # and the ap_id is the stable origin URL. Short-circuit if we
+    # already have this note on file.
+    case remote_ap_id && Repo.get_by(Message, ap_id: remote_ap_id) do
+      %Message{} = existing ->
+        {:ok, decrypt_message(existing)}
+
+      _ ->
+        with {:ok, conv} <- find_or_create_direct(sender.id, recipient.id) do
+          now = Map.get(attrs, :published) |> parse_published() || DateTime.utc_now()
+          message_attrs = %{"content" => plaintext}
+
+          with {:ok, encrypted_attrs} <-
+                 encrypt_message_attrs(conv.id, sender.id, message_attrs) do
+            encrypted_attrs =
+              encrypted_attrs
+              |> Map.put("ap_id", remote_ap_id)
+
+            case do_insert_remote_message(conv.id, sender.id, encrypted_attrs, now) do
+              {:ok, message} ->
+                {:ok, decrypt_message(message)}
+
+              other ->
+                other
+            end
+          end
+        end
+    end
+  end
+
+  defp prior_message_ap_id(conversation_id, current_message_id) do
+    Message
+    |> where(
+      [m],
+      m.conversation_id == ^conversation_id and m.id != ^current_message_id and
+        is_nil(m.deleted_at) and not is_nil(m.ap_id)
+    )
+    |> order_by([m], desc: m.created_at)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      msg -> msg.ap_id
+    end
+  end
+
+  defp parse_published(nil), do: nil
+
+  defp parse_published(str) when is_binary(str) do
+    case DateTime.from_iso8601(str) do
+      # Our `messages.created_at` column is `utc_datetime_usec`; Mastodon's
+      # `published` is second-precision, so pad microseconds explicitly
+      # rather than letting Ecto reject the value.
+      {:ok, dt, _offset} -> %{dt | microsecond: {0, 6}}
+      _ -> nil
+    end
+  end
+
+  defp parse_published(_), do: nil
+
+  # Insert path for remote DMs. Same shape as `do_send_message` but
+  # skips the delivery-status rows (they track outbound fan-out — an
+  # inbound message has no recipients to track) and the publisher
+  # task (the sender is remote).
+  defp do_insert_remote_message(conversation_id, _sender_id, message_attrs, now) do
+    Ecto.Multi.new()
+    |> Ecto.Multi.insert(
+      :message,
+      Message.encrypted_changeset(%Message{created_at: now}, message_attrs)
+    )
+    |> Ecto.Multi.run(:bump_conversation, fn repo, _changes ->
+      Conversation
+      |> where([c], c.id == ^conversation_id)
+      |> repo.update_all(set: [updated_at: now])
+
+      {:ok, :bumped}
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{message: message}} ->
+        broadcast_new_message(message)
+        {:ok, message}
+
+      {:error, :message, changeset, _changes} ->
+        {:error, changeset}
+
+      {:error, _step, reason, _changes} ->
+        {:error, reason}
+    end
+  end
+
+  # Dispatches to the right activity builder per recipient software.
+  # The compose-time `check_peer_supports_dm` gate means chat-incapable
+  # peers shouldn't land here, but a peer could flip capability after
+  # a conversation was created — in that case we log + fall back to a
+  # direct-visibility Note so the message still reaches them somehow.
+  defp build_dm_activity(sender, recipient, message, plaintext) do
+    if Hybridsocial.Federation.NodeInfo.chat_capable?(recipient.ap_actor_url) do
+      build_chat_message_create(sender, recipient, message, plaintext)
+    else
+      Logger.warning(
+        "DM target #{recipient.ap_actor_url} is not chat-capable; emitting Note fallback"
+      )
+
+      build_direct_create(sender, recipient, message, plaintext)
+    end
+  end
+
+  # Pleroma/Akkoma native one-on-one DM primitive. Distinct from
+  # Note: it has no public addressing (ever), no `tag` array, no
+  # conversation URI (they pair by sender↔recipient internally),
+  # and `content` is plaintext — the peer does its own rendering.
+  # The `ChatMessage` term must be declared in the `@context` or
+  # strict JSON-LD parsers drop the type; Pleroma itself publishes
+  # this mapping so we mirror what they emit.
+  defp build_chat_message_create(sender, recipient, message, plaintext) do
+    base = HybridsocialWeb.Endpoint.url()
+    sender_url = "#{base}/actors/#{sender.id}"
+    chat_id = "#{base}/dm/#{message.id}"
+    activity_id = "#{base}/activities/#{sender.id}/create-chat/#{message.id}"
+    published = message.created_at || DateTime.utc_now()
+
+    chat = %{
+      "type" => "ChatMessage",
+      "id" => chat_id,
+      "attributedTo" => sender_url,
+      "to" => [recipient.ap_actor_url],
+      "content" => plaintext,
+      "published" => DateTime.to_iso8601(published)
+    }
+
+    %{
+      "@context" => [
+        "https://www.w3.org/ns/activitystreams",
+        "https://w3id.org/security/v1",
+        %{"ChatMessage" => "http://litepub.social/ns#ChatMessage"}
+      ],
+      "id" => activity_id,
+      "type" => "Create",
+      "actor" => sender_url,
+      "published" => DateTime.to_iso8601(published),
+      "to" => [recipient.ap_actor_url],
+      "object" => chat
+    }
+  end
+
+  defp build_direct_create(sender, recipient, message, plaintext) do
+    base = HybridsocialWeb.Endpoint.url()
+    sender_url = "#{base}/actors/#{sender.id}"
+    # Use `/dm/:id` rather than `/messages/:id` — the latter collides
+    # with the SvelteKit DM conversation route, so when Mastodon
+    # links to "see replies on arab.place" the frontend tries to
+    # load the message UUID as a conversation and renders blank.
+    note_id = "#{base}/dm/#{message.id}"
+    activity_id = "#{base}/activities/#{sender.id}/create-dm/#{message.id}"
+    published = message.created_at || DateTime.utc_now()
+
+    # Stable, non-dereferenceable thread key. Mastodon uses the
+    # `conversation` / `context` URI (as opaque string) to group
+    # statuses into a single thread in the DM UI. Without it, every
+    # message we send shows up as its own thread in "Private mentions".
+    %URI{host: host} = URI.parse(base)
+    thread_uri = "tag:#{host},2026:objectId=#{message.conversation_id}:objectType=Conversation"
+
+    mention = %{
+      "type" => "Mention",
+      "href" => recipient.ap_actor_url,
+      "name" => "@#{recipient.handle}"
+    }
+
+    # Chain this message to the most recent prior message in the
+    # conversation. Mastodon's private-mentions view groups by the
+    # `conversation` URI, but the actual thread tree is built from
+    # `inReplyTo` — without the chain, each DM renders as its own
+    # standalone thread when the user clicks in.
+    in_reply_to = prior_message_ap_id(message.conversation_id, message.id)
+
+    note = %{
+      "type" => "Note",
+      "id" => note_id,
+      "attributedTo" => sender_url,
+      "content" => plaintext,
+      "published" => DateTime.to_iso8601(published),
+      "to" => [recipient.ap_actor_url],
+      "cc" => [],
+      "tag" => [mention],
+      "inReplyTo" => in_reply_to,
+      "conversation" => thread_uri,
+      "context" => thread_uri,
+      # Mastodon uses this extension to flag messages as DMs in the
+      # UI — without it the recipient sees the note as a mention in
+      # their notifications rather than in their DMs inbox.
+      "directMessage" => true
+    }
+
+    %{
+      "@context" => [
+        "https://www.w3.org/ns/activitystreams",
+        "https://w3id.org/security/v1"
+      ],
+      "id" => activity_id,
+      "type" => "Create",
+      "actor" => sender_url,
+      "published" => DateTime.to_iso8601(published),
+      "to" => [recipient.ap_actor_url],
+      "cc" => [],
+      "object" => note
+    }
   end
 
   defp encrypt_message_attrs(conversation_id, sender_id, attrs) do
@@ -317,22 +808,10 @@ defmodule Hybridsocial.Messaging do
         {:error, :not_found}
 
       %Message{sender_id: ^sender_id, deleted_at: nil} = message ->
-        case Hybridsocial.Messaging.Crypto.encrypt(new_content, message.conversation_id) do
-          {:ok, ciphertext, nonce, version} ->
-            case message
-                 |> Message.edit_encrypted_changeset(%{
-                   ciphertext: ciphertext,
-                   nonce: nonce,
-                   encryption_version: version,
-                   edited_at: DateTime.utc_now()
-                 })
-                 |> Repo.update() do
-              {:ok, updated} -> {:ok, decrypt_message(updated)}
-              other -> other
-            end
-
-          {:error, reason} ->
-            {:error, {:encryption_failed, reason}}
+        if within_edit_window?(message) do
+          edit_encrypted(message, new_content)
+        else
+          {:error, :edit_window_expired}
         end
 
       %Message{deleted_at: deleted_at} when not is_nil(deleted_at) ->
@@ -340,6 +819,36 @@ defmodule Hybridsocial.Messaging do
 
       %Message{} ->
         {:error, :forbidden}
+    end
+  end
+
+  # Senders may edit their own DMs for a brief grace period after
+  # send (default 5 min). After that the bubble locks down — anyone
+  # remembering the original wording is then guaranteed to still be
+  # looking at the same bytes.
+  defp within_edit_window?(%Message{created_at: created_at}) do
+    seconds = Hybridsocial.Config.get("dm_edit_window_seconds", 300)
+    cutoff = DateTime.add(created_at, seconds, :second)
+    DateTime.compare(DateTime.utc_now(), cutoff) == :lt
+  end
+
+  defp edit_encrypted(message, new_content) do
+    case Hybridsocial.Messaging.Crypto.encrypt(new_content, message.conversation_id) do
+      {:ok, ciphertext, nonce, version} ->
+        case message
+             |> Message.edit_encrypted_changeset(%{
+               ciphertext: ciphertext,
+               nonce: nonce,
+               encryption_version: version,
+               edited_at: DateTime.utc_now()
+             })
+             |> Repo.update() do
+          {:ok, updated} -> {:ok, decrypt_message(updated)}
+          other -> other
+        end
+
+      {:error, reason} ->
+        {:error, {:encryption_failed, reason}}
     end
   end
 
@@ -617,8 +1126,42 @@ defmodule Hybridsocial.Messaging do
   # Message Reactions
   # ---------------------------------------------------------------------------
 
-  @doc "Add an emoji reaction to a message."
+  @doc """
+  Add an emoji reaction to a message.
+
+  Returns `{:error, :premium_required}` when `emoji` is in the
+  admin-curated premium reaction catalog and the caller's tier
+  doesn't include `custom_emoji` (free / verified_starter).
+  """
   def react_to_message(message_id, identity_id, emoji) do
+    with :ok <- check_reaction_tier(emoji, identity_id) do
+      do_react_to_message(message_id, identity_id, emoji)
+    end
+  end
+
+  defp check_reaction_tier(emoji, identity_id) do
+    cond do
+      Hybridsocial.Reactions.default_reaction?(emoji) ->
+        :ok
+
+      Hybridsocial.Reactions.premium_reaction?(emoji) ->
+        identity = Hybridsocial.Repo.get(Hybridsocial.Accounts.Identity, identity_id)
+
+        if identity && Hybridsocial.Premium.TierLimits.limit(identity, :custom_emoji) do
+          :ok
+        else
+          {:error, :premium_required}
+        end
+
+      true ->
+        # Unknown emoji — let the existing changeset rules decide.
+        # Don't block here so legitimate future expansions of the
+        # reaction set keep working.
+        :ok
+    end
+  end
+
+  defp do_react_to_message(message_id, identity_id, emoji) do
     %MessageReaction{}
     |> MessageReaction.changeset(%{
       message_id: message_id,
@@ -743,12 +1286,7 @@ defmodule Hybridsocial.Messaging do
       content: message.content,
       content_type: message.content_type,
       reply_to_id: message.reply_to_id,
-      sender: %{
-        id: message.sender.id,
-        handle: message.sender.handle,
-        display_name: message.sender.display_name,
-        avatar_url: message.sender.avatar_url
-      },
+      sender: HybridsocialWeb.Helpers.Account.serialize_summary(message.sender),
       created_at: message.created_at
     })
   end

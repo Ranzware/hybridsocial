@@ -82,6 +82,12 @@ defmodule HybridsocialWeb.Plugs.RateLimiter do
       "/api/v1/auth/register" ->
         {Config.get("rate_limit_register", 20), 3600}
 
+      "/api/v1/auth/recover/validate" ->
+        {Config.get("rate_limit_recover", 5), 3600}
+
+      "/api/v1/auth/recover/complete" ->
+        {Config.get("rate_limit_recover", 5), 3600}
+
       _ ->
         if authenticated?(conn) do
           {Config.rate_limit_authenticated(), 60}

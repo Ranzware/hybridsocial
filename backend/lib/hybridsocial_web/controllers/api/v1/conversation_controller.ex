@@ -58,6 +58,18 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
       {:error, :dm_not_allowed} ->
         conn |> put_status(:forbidden) |> json(%{error: "dm.not_allowed"})
 
+      {:error, :dm_not_supported, info} ->
+        # Peer software doesn't speak ChatMessage. The frontend will
+        # catch this and silently compose a direct-visibility post
+        # with the recipient mentioned instead.
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: "dm.not_supported_by_peer",
+          fallback: "direct_post",
+          recipient: info
+        })
+
       {:error, :cannot_message_self} ->
         conn |> put_status(:unprocessable_entity) |> json(%{error: "dm.cannot_message_self"})
 
@@ -93,10 +105,26 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "conversation.not_found"})
 
-      {:error, changeset} ->
+      {:error, {:encryption_failed, reason}} ->
+        # DMs are encrypted at rest. If the master key isn't
+        # configured we can't store anything, so surface a clear
+        # operator-facing error instead of a generic 500.
+        conn
+        |> put_status(:service_unavailable)
+        |> json(%{
+          error: "dm.encryption_unavailable",
+          detail: to_string(reason)
+        })
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: "validation.failed", details: format_errors(changeset)})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "message.failed", detail: inspect(reason)})
     end
   end
 
@@ -134,10 +162,31 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
       {:error, :forbidden} ->
         conn |> put_status(:forbidden) |> json(%{error: "message.forbidden"})
 
+      {:error, :edit_window_expired} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{
+          error: "message.edit_window_expired",
+          message: "This message can no longer be edited. The edit window has closed."
+        })
+
       {:error, changeset} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: "validation.failed", details: format_errors(changeset)})
+    end
+  end
+
+  # DELETE /api/v1/conversations/:id
+  def delete_conversation(conn, %{"id" => conversation_id}) do
+    identity = conn.assigns.current_identity
+
+    case Messaging.delete_conversation(conversation_id, identity.id) do
+      {:ok, _participant} ->
+        json(conn, %{message: "conversation.deleted"})
+
+      {:error, :not_found} ->
+        conn |> put_status(:not_found) |> json(%{error: "conversation.not_found"})
     end
   end
 
@@ -254,8 +303,22 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
       is_encrypted: conversation.is_local == true,
       created_by_id: conversation.created_by_id,
       participants: participants,
+      last_message: serialize_last_message(Map.get(conversation, :last_message)),
+      unread_count: Map.get(conversation, :unread_count) || 0,
       created_at: conversation.inserted_at,
       updated_at: conversation.updated_at
+    }
+  end
+
+  defp serialize_last_message(nil), do: nil
+
+  defp serialize_last_message(%Hybridsocial.Messaging.Message{} = message) do
+    %{
+      id: message.id,
+      content: message.content,
+      content_type: message.content_type,
+      sender_id: message.sender_id,
+      created_at: message.created_at
     }
   end
 
@@ -269,12 +332,15 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
           Hybridsocial.Accounts.get_identity(participant.identity_id)
       end
 
+    summary = HybridsocialWeb.Helpers.Account.serialize_summary(identity) || %{}
+
     %{
       id: participant.id,
       identity_id: participant.identity_id,
-      handle: identity && identity.handle,
-      display_name: identity && identity.display_name,
-      avatar_url: identity && identity.avatar_url,
+      handle: Map.get(summary, :handle),
+      acct: Map.get(summary, :acct),
+      display_name: Map.get(summary, :display_name),
+      avatar_url: Map.get(summary, :avatar_url),
       joined_at: participant.joined_at,
       notifications_enabled: participant.notifications_enabled,
       left_at: participant.left_at
@@ -285,12 +351,7 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
     sender =
       case message.sender do
         %Hybridsocial.Accounts.Identity{} = identity ->
-          %{
-            id: identity.id,
-            handle: identity.handle,
-            display_name: identity.display_name,
-            avatar_url: identity.avatar_url
-          }
+          HybridsocialWeb.Helpers.Account.serialize_summary(identity)
 
         _ ->
           nil
@@ -366,6 +427,14 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
     case Messaging.react_to_message(message_id, identity.id, emoji) do
       {:ok, reaction} ->
         json(conn, %{id: reaction.id, emoji: reaction.emoji, message_id: reaction.message_id})
+
+      {:error, :premium_required} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{
+          error: "reaction.premium_required",
+          message: "This reaction is available on premium tiers."
+        })
 
       {:error, changeset} ->
         conn

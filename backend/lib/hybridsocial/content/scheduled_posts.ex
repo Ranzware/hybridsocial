@@ -17,13 +17,15 @@ defmodule Hybridsocial.Content.ScheduledPosts do
          :ok <- validate_future(parsed_time) do
       post_attrs =
         attrs
-        |> Map.put("identity_id", identity_id)
         |> Map.put("scheduled_at", parsed_time)
 
-      %Post{}
-      |> Post.create_changeset(post_attrs)
-      |> Ecto.Changeset.put_change(:scheduled_at, parsed_time)
-      |> Repo.insert()
+      # Route through the standard create path so scheduled posts
+      # get the same ap_id, mention persistence, hashtag indexing
+      # and poll creation as any other post. `create_post` notices
+      # `scheduled_at` in the future and skips only the side
+      # effects that make the post "live" (federation + direct-post
+      # broadcast); the worker fires those at publish time.
+      Hybridsocial.Social.Posts.create_post(identity_id, post_attrs)
     end
   end
 
@@ -83,18 +85,37 @@ defmodule Hybridsocial.Content.ScheduledPosts do
   end
 
   @doc """
-  Publishes all posts whose scheduled_at time has passed.
-  Sets published_at to now for each due post.
+  Publishes all posts whose scheduled_at time has passed. Each post
+  goes through the same side-effect chain as a fresh create:
+  federation fan-out, mention persistence, notifications, and the
+  direct-post realtime broadcast. The bulk `update_all` that used
+  to live here flipped `published_at` but left every downstream
+  action un-fired — scheduled direct posts never reached their
+  recipients and mention notifications never arrived.
   """
   def publish_due_posts do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
-    Post
-    |> where([p], not is_nil(p.scheduled_at))
-    |> where([p], p.scheduled_at <= ^now)
-    |> where([p], is_nil(p.published_at))
-    |> where([p], is_nil(p.deleted_at))
-    |> Repo.update_all(set: [published_at: now])
+    due_posts =
+      Post
+      |> where([p], not is_nil(p.scheduled_at))
+      |> where([p], p.scheduled_at <= ^now)
+      |> where([p], is_nil(p.published_at))
+      |> where([p], is_nil(p.deleted_at))
+      |> Repo.all()
+
+    Enum.each(due_posts, fn post ->
+      case post |> Post.publish_changeset(now) |> Repo.update() do
+        {:ok, published} ->
+          Hybridsocial.Social.Posts.run_post_published_hooks(published)
+
+        {:error, reason} ->
+          require Logger
+          Logger.warning("Scheduled publish failed for #{post.id}: #{inspect(reason)}")
+      end
+    end)
+
+    length(due_posts)
   end
 
   # --- Private helpers ---

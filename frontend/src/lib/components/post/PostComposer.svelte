@@ -8,6 +8,14 @@
   import { createDraft, updateDraft, getDraft, deleteDraft } from '$lib/api/drafts.js';
   import { currentUser, authStore } from '$lib/stores/auth.js';
   import EmojiPicker from './EmojiPicker.svelte';
+  import { markSeen } from '$lib/utils/seen-posts.js';
+
+  // `showFab` hides the floating "new post" button on routes where
+  // composing from scratch doesn't make sense (DMs, settings, admin)
+  // while still letting the composer be opened programmatically via
+  // the `open-composer` window event — that's how the DM→direct-post
+  // fallback works: posting is still possible, just not surfaced.
+  let { showFab = true }: { showFab?: boolean } = $props();
 
   let isOpen = $state(false);
   let content = $state('');
@@ -57,11 +65,22 @@
   let charCount = $derived(content.length);
   let charsRemaining = $derived(charLimit - charCount);
   let isOverLimit = $derived(charsRemaining < 0);
+
+  // Direct posts are audience-scoped by @mentions in the content;
+  // a direct post with zero mentions would be addressed to no one
+  // (silent "me only"). Block send until at least one mention lands
+  // so the user doesn't ship a post into the void.
+  let mentionCount = $derived(
+    (content.match(/@[a-zA-Z0-9_]+(@[a-zA-Z0-9.\-]+)?/g) ?? []).length,
+  );
+  let directNeedsAudience = $derived(visibility === 'direct' && mentionCount === 0);
+
   let canSubmit = $derived(
     content.trim().length > 0
     && !isOverLimit
     && !loading
     && !mediaUploading
+    && !directNeedsAudience
     && (!showPoll || (pollOptions.filter((o) => o.trim()).length >= 2))
   );
 
@@ -71,12 +90,30 @@
       const detail = (e as CustomEvent).detail;
       if (detail?.replyTo) {
         replyTo = detail.replyTo;
+        // Default the reply to the parent's visibility — a reply
+        // to a direct post staying public would leak the thread to
+        // followers who weren't in the original audience. User can
+        // still widen visibility explicitly before sending.
+        const parentVis = detail.replyTo.visibility;
+        if (parentVis === 'public' || parentVis === 'followers' || parentVis === 'direct') {
+          visibility = parentVis;
+        }
       }
       if (detail?.quotePost) {
         quotePost = detail.quotePost;
       }
       if (detail?.prefill) {
         content = detail.prefill;
+      }
+      // Explicit visibility wins over the replyTo default — the DM
+      // fallback flow passes { visibility: 'direct' } even without
+      // a replyTo, and callers prefilling a direct reply want that
+      // to stick.
+      if (
+        detail?.visibility &&
+        ['public', 'followers', 'direct'].includes(detail.visibility)
+      ) {
+        visibility = detail.visibility;
       }
       if (detail?.draftId) {
         loadDraftById(detail.draftId);
@@ -637,6 +674,7 @@
 
       // Increment parent's reply count immediately
       if (parentId) {
+        markSeen(parentId);
         window.dispatchEvent(new CustomEvent('reply-count-update', { detail: { postId: parentId, delta: 1 } }));
       }
 
@@ -670,7 +708,7 @@
 </script>
 
 <!-- Floating action button -->
-{#if !isOpen}
+{#if !isOpen && showFab}
   <button
     type="button"
     class="fab"
@@ -713,7 +751,7 @@
 
     {#if replyTo}
       <div class="composer-reply-context">
-        Replying to <strong>@{replyTo.account.handle}</strong>
+        Replying to <strong>@{replyTo.account.acct || replyTo.account.handle}</strong>
       </div>
     {/if}
 
@@ -1005,6 +1043,11 @@
             {activeServerDraftId ? 'Update draft' : 'Save draft'}
           {/if}
         </button>
+        {#if directNeedsAudience}
+          <span class="composer-hint" role="status">
+            Add a @mention to address this direct post.
+          </span>
+        {/if}
         <button
           type="button"
           class="composer-submit"
@@ -1024,6 +1067,13 @@
 {/if}
 
 <style>
+  .composer-hint {
+    font-size: var(--text-xs);
+    color: var(--color-warning, #d97706);
+    margin-inline-end: var(--space-2);
+    align-self: center;
+  }
+
   .visually-hidden {
     position: absolute;
     width: 1px;

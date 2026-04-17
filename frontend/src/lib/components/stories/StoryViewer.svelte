@@ -370,8 +370,8 @@
                   </div>
                 {/if}
                 <div class="viewer-meta">
-                  <div class="viewer-name">{v.account.display_name || v.account.handle}</div>
-                  <div class="viewer-handle">@{v.account.handle}</div>
+                  <div class="viewer-name">{v.account.display_name || v.account.acct || v.account.handle}</div>
+                  <div class="viewer-handle">@{v.account.acct || v.account.handle}</div>
                 </div>
                 <div class="viewer-time">{timeAgo(v.viewed_at)}</div>
               </div>

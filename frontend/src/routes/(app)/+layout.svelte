@@ -1,73 +1,95 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { browser } from '$app/environment';
-  import { get } from 'svelte/store';
   import AppLayout from '$lib/components/layout/AppLayout.svelte';
   import ConnectionBanner from '$lib/components/ui/ConnectionBanner.svelte';
   import OnboardingModal from '$lib/components/ui/OnboardingModal.svelte';
-  import { authStore, isLoggedIn } from '$lib/stores/auth.js';
+  import { authStore } from '$lib/stores/auth.js';
   import { connectNotificationStream, disconnectNotificationStream } from '$lib/stores/notifications.js';
+  import { connectChatStream, disconnectChatStream } from '$lib/stores/chat-stream.js';
+  import { initSound } from '$lib/stores/sound.js';
+  import { initDmUnread } from '$lib/stores/dm-unread.js';
   import { cookieConsent, hasConsented } from '$lib/stores/consent.js';
   import CookieBanner from '$lib/components/ui/CookieBanner.svelte';
   import { subscribeToPush } from '$lib/utils/push.js';
   import { loadFilters } from '$lib/stores/content-filters.js';
   import PostComposer from '$lib/components/post/PostComposer.svelte';
-  import { onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
+  import { page } from '$app/state';
+
+  // Routes where the floating "new post" FAB makes no sense and just
+  // gets in the way of real UI (DMs hide the message input behind it;
+  // admin/settings are task-focused and the user isn't there to post).
+  const NO_COMPOSER_PREFIXES = ['/messages', '/admin', '/settings'];
+  let showComposer = $derived(
+    !NO_COMPOSER_PREFIXES.some((p) => page.url.pathname.startsWith(p)),
+  );
 
   let { children } = $props();
-  let loggedIn = $state(false);
+  let authState = $state({ user: null as any, initialized: false });
   let consented = $state(hasConsented());
   let showOnboarding = $state(false);
+  let streamsStarted = false;
+  let redirecting = $state(false);
 
   cookieConsent.subscribe((v) => (consented = v));
-  const unsub = isLoggedIn.subscribe((v) => (loggedIn = v));
+  const unsubAuth = authStore.subscribe((s) => (authState = s));
 
-  onMount(() => {
-    const state = get(authStore);
+  // Gate rendering + side-effects on auth being resolved. Until the
+  // root layout's initAuth() finishes we don't know whether the user
+  // is logged in, so rendering the authed app shell (or connecting
+  // SSE streams) just produces 401s and a misleading "Connection
+  // lost" banner before the login redirect fires.
+  $effect(() => {
+    if (!browser || !authState.initialized) return;
 
-    // Redirect to login if not authenticated
-    if (!state.user && state.initialized) {
-      goto('/login');
+    if (!authState.user) {
+      if (!redirecting) {
+        redirecting = true;
+        goto('/login');
+      }
       return;
     }
 
-    // Connect notification SSE stream + push notifications (auth via httpOnly cookies)
-    const apiBase = import.meta.env.VITE_API_URL || '';
-    connectNotificationStream(apiBase);
-    subscribeToPush();
-    loadFilters();
+    if (!streamsStarted) {
+      streamsStarted = true;
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      connectNotificationStream(apiBase);
+      connectChatStream(apiBase);
+      initSound();
+      initDmUnread();
+      subscribeToPush();
+      loadFilters();
 
-    // Show onboarding once for brand-new users (server-persisted onboarded_at)
-    const authState = get(authStore);
-    if (authState.user && !authState.user.onboarded_at) {
-      showOnboarding = true;
-    }
-
-    return () => {
-      disconnectNotificationStream();
-      unsub();
-    };
-  });
-
-  // Watch for logout while on authenticated pages
-  $effect(() => {
-    if (browser && !loggedIn) {
-      const state = get(authStore);
-      if (state.initialized) {
-        goto('/login');
+      if (!authState.user.onboarded_at) {
+        showOnboarding = true;
       }
     }
+  });
+
+  onDestroy(() => {
+    disconnectNotificationStream();
+    disconnectChatStream();
+    unsubAuth();
   });
 </script>
 
 {#if !consented}
   <CookieBanner onaccept={() => consented = true} />
+{:else if !authState.initialized || !authState.user}
+  <!-- Hold the shell blank until auth is resolved. Rendering authed
+       pages before we know the user's status fires off 401s and a
+       spurious "Connection lost" banner right before the redirect
+       to /login. -->
 {:else}
   <ConnectionBanner />
   <AppLayout>
     {@render children()}
   </AppLayout>
-  <PostComposer />
+  <!-- Always mounted so the DM→direct-post fallback can dispatch
+       an open-composer event from /messages/new (where the FAB is
+       hidden). The FAB itself stays hidden on messages/admin/settings. -->
+  <PostComposer showFab={showComposer} />
   {#if showOnboarding}
     <OnboardingModal onclose={() => { showOnboarding = false; }} />
   {/if}

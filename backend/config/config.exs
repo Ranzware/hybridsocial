@@ -16,9 +16,14 @@ config :hybridsocial,
   nats_port: 4222,
   nats_monitoring_port: 8222
 
-# Register event-stream MIME type for SSE
+# Register custom MIME types so Phoenix's `accepts` plug recognizes
+# them. event-stream covers SSE; the two ActivityPub types are
+# required so federation actor + collection endpoints can negotiate
+# Content-Type without Phoenix 406-ing the request.
 config :mime, :types, %{
-  "text/event-stream" => ["event-stream"]
+  "text/event-stream" => ["event-stream"],
+  "application/activity+json" => ["activity+json"],
+  "application/ld+json" => ["ld+json"]
 }
 
 # Configure the endpoint

@@ -1,7 +1,38 @@
-# Media domain — serves user uploads from a separate origin for security
-# Set MEDIA_DOMAIN env var to enable (e.g. media.hybridsocial.com)
-{$MEDIA_DOMAIN:} {
-	# Only serve uploads — no cookies, no scripts
+# HybridSocial production Caddyfile.
+#
+# Reads two env vars:
+#   $DOMAIN          (required) — main public domain
+#   $MEDIA_DOMAIN    (optional) — separate origin for user uploads
+#                                  (recommended: media.<domain>)
+#
+# Topology:
+#   * Main domain: full WAF (CrowdSec + Coraza/CRS) on every handler
+#                  except /api/v1/streaming/* (long-lived WebSockets)
+#   * Media domain: NO app-layer WAF. Static file serving only —
+#                   ClamAV scans uploads inside the backend before
+#                   they reach storage, and CrowdSec at the IP layer
+#                   still applies via the global config.
+{
+	# Plugin order — both must come before reverse_proxy or they're
+	# bypassed for proxied responses.
+	order crowdsec first
+	order coraza_waf before reverse_proxy
+
+	# CrowdSec bouncer config. The agent runs in its own container
+	# and exposes its LAPI on http://crowdsec:8080. The bouncer key
+	# is registered out-of-band on first agent startup (see
+	# crowdsec service env in docker-compose-production.yml).
+	crowdsec {
+		api_url http://crowdsec:8080
+		api_key {$CROWDSEC_BOUNCER_CADDY_KEY}
+		ticker_interval 15s
+	}
+}
+
+# ---------- Media domain (no WAF) ----------
+# Only mounted when MEDIA_DOMAIN is set; defaults to an unreachable
+# placeholder so Caddy doesn't bind a wildcard site block.
+{$MEDIA_DOMAIN:media.invalid} {
 	header {
 		X-Content-Type-Options nosniff
 		Content-Security-Policy "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'"
@@ -14,54 +45,28 @@
 		reverse_proxy backend:4000
 	}
 
-	# Block everything else
 	handle {
 		respond "Not Found" 404
 	}
 
 	encode gzip zstd
+
+	log {
+		output file /var/log/caddy/media-access.log {
+			roll_size 100mb
+			roll_keep 5
+		}
+		format json
+	}
 }
 
+# ---------- Main domain ----------
 {$DOMAIN:localhost} {
-	# Frontend (SvelteKit)
-	handle /api/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /.well-known/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /nodeinfo/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /inbox {
-		reverse_proxy backend:4000
-	}
-
-	handle /users/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /actors/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /activities/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /oauth/* {
-		reverse_proxy backend:4000
-	}
-
-	handle /media/* {
-		reverse_proxy backend:4000
-	}
-
-	# WebSocket streaming
-	handle /api/v1/streaming/* {
+	# WebSocket streaming — bypass Coraza (response-body scanning
+	# breaks long-lived connections). CrowdSec still applies via
+	# the global directive order.
+	@streaming path /api/v1/streaming/*
+	handle @streaming {
 		reverse_proxy backend:4000 {
 			transport http {
 				read_timeout 0
@@ -69,28 +74,38 @@
 		}
 	}
 
-	# Everything else goes to frontend
+	# Everything else gets the full WAF stack.
 	handle {
+		import /etc/caddy/waf.caddy
+
+		@api path /api/* /.well-known/* /nodeinfo/* /inbox /users/* /actors/* /activities/* /oauth/* /media/*
+		handle @api {
+			reverse_proxy backend:4000
+		}
+
+		# SvelteKit frontend
 		reverse_proxy frontend:3000
 	}
 
-	# Security headers
+	# Defense-in-depth response headers.
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 	}
 
-	# Compression
 	encode gzip zstd
 
-	# Logging
+	# JSON access log — CrowdSec's `crowdsecurity/caddy` parser
+	# expects this format and reads from this exact path.
 	log {
-		output file /data/access.log {
-			roll_size 10mb
+		output file /var/log/caddy/access.log {
+			roll_size 100mb
 			roll_keep 5
 		}
+		format json
 	}
 }

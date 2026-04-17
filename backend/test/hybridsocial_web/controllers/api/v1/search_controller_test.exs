@@ -90,4 +90,85 @@ defmodule HybridsocialWeb.Api.V1.SearchControllerTest do
       assert length(response["statuses"]) >= 1
     end
   end
+
+  describe "exact_remote_match?/2" do
+    # Regression: searching `@user@domain` was incorrectly satisfied
+    # by ANY local result containing the username substring, so
+    # federation lookup never fired for users on instances we hadn't
+    # talked to before. The gate must require an exact (user, host)
+    # match before considering local results a hit.
+
+    alias HybridsocialWeb.Api.V1.SearchController
+
+    defp identity_with(attrs) do
+      Map.merge(
+        %Hybridsocial.Accounts.Identity{
+          id: Ecto.UUID.generate(),
+          handle: "placeholder"
+        },
+        attrs
+      )
+    end
+
+    test "true when an identity's acct exactly matches the query" do
+      identities = [
+        identity_with(%{
+          handle: "ahmad_bassamso_aaa",
+          ap_actor_url: "https://bassam.social/users/ahmad"
+        })
+      ]
+
+      assert SearchController.exact_remote_match?("@ahmad@bassam.social", identities)
+    end
+
+    test "case-insensitive comparison" do
+      identities = [
+        identity_with(%{
+          handle: "ahmad_bassamso_aaa",
+          ap_actor_url: "https://bassam.social/users/ahmad"
+        })
+      ]
+
+      assert SearchController.exact_remote_match?("@AHMAD@BASSAM.SOCIAL", identities)
+    end
+
+    test "false when only a different-domain remote with same username matches" do
+      identities = [
+        identity_with(%{
+          handle: "ahmad_mastodon_aaa",
+          ap_actor_url: "https://mastodon.social/users/ahmad"
+        })
+      ]
+
+      refute SearchController.exact_remote_match?("@ahmad@bassam.social", identities)
+    end
+
+    test "false when only a local user with same handle matches" do
+      identities = [
+        identity_with(%{handle: "ahmad", ap_actor_url: nil})
+      ]
+
+      refute SearchController.exact_remote_match?("@ahmad@bassam.social", identities)
+    end
+
+    test "false for empty result list" do
+      refute SearchController.exact_remote_match?("@ahmad@bassam.social", [])
+    end
+
+    test "true when match is anywhere in the result list, not just first" do
+      identities = [
+        identity_with(%{handle: "ahmad", ap_actor_url: nil}),
+        identity_with(%{
+          handle: "ahmad_mastodon_aaa",
+          ap_actor_url: "https://mastodon.social/users/ahmad"
+        }),
+        identity_with(%{
+          handle: "ahmad_bassamso_aaa",
+          ap_actor_url: "https://bassam.social/users/ahmad"
+        })
+      ]
+
+      assert SearchController.exact_remote_match?("@ahmad@bassam.social", identities)
+    end
+  end
 end

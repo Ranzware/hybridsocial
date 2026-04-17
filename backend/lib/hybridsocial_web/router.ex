@@ -2,7 +2,10 @@ defmodule HybridsocialWeb.Router do
   use HybridsocialWeb, :router
 
   pipeline :api do
-    plug :accepts, ["json"]
+    # JSON for our REST API; activity+json and ld+json so federation
+    # actor + collection endpoints can negotiate Content-Type per
+    # the ActivityPub spec.
+    plug :accepts, ["json", "activity+json", "ld+json"]
     plug HybridsocialWeb.Plugs.IpBan
     plug HybridsocialWeb.Plugs.RateLimiter
   end
@@ -42,7 +45,8 @@ defmodule HybridsocialWeb.Router do
     post "/2fa/login", AuthController, :login_with_otp
     post "/password/reset", AuthController, :password_reset
     post "/password/change", AuthController, :password_change
-    post "/recover", AuthController, :recover
+    post "/recover/validate", AuthController, :recover_validate
+    post "/recover/complete", AuthController, :recover_complete
     get "/pow_challenge", AuthController, :pow_challenge
     get "/pow-challenge", AuthController, :pow_challenge
 
@@ -272,6 +276,7 @@ defmodule HybridsocialWeb.Router do
   scope "/api/v1/statuses", HybridsocialWeb.Api.V1 do
     pipe_through [:api, :optional_auth]
 
+    post "/by_ids", StatusController, :by_ids
     get "/:id", StatusController, :show
     get "/:id/context", StatusController, :context
     get "/:id/history", StatusController, :history
@@ -400,6 +405,7 @@ defmodule HybridsocialWeb.Router do
     get "/", ConversationController, :index
     post "/", ConversationController, :create
     get "/:id", ConversationController, :show
+    delete "/:id", ConversationController, :delete_conversation
     post "/:id/messages", ConversationController, :send_message
     get "/:id/messages", ConversationController, :messages
     put "/:id/messages/:mid", ConversationController, :edit_message
@@ -490,6 +496,13 @@ defmodule HybridsocialWeb.Router do
     pipe_through :api
 
     get "/pricing", PromotionController, :pricing
+  end
+
+  # Premium reactions catalog (public — picker reads on every page)
+  scope "/api/v1", HybridsocialWeb.Api.V1 do
+    pipe_through :api
+
+    get "/premium_reactions", PremiumReactionController, :index
   end
 
   # Promotions (optional auth — promoted users for sidebar)
@@ -806,6 +819,12 @@ defmodule HybridsocialWeb.Router do
     get "/site_pages/:id", Admin.SitePagesController, :show
     put "/site_pages/:id", Admin.SitePagesController, :update
     post "/site_pages/seed", Admin.SitePagesController, :seed
+
+    # Premium reaction catalog (curated emoji set for premium tiers)
+    get "/premium_reactions", Admin.PremiumReactionController, :index
+    post "/premium_reactions", Admin.PremiumReactionController, :create
+    patch "/premium_reactions/:id", Admin.PremiumReactionController, :update
+    delete "/premium_reactions/:id", Admin.PremiumReactionController, :delete
   end
 
   # Markers (authenticated)
@@ -883,6 +902,19 @@ defmodule HybridsocialWeb.Router do
     pipe_through :api
 
     post "/inbox", InboxController, :shared_inbox
+
+    # Dereferenceable AP Note object for each post. Mastodon follows
+    # `object.id` from Create activities to this URL to verify +
+    # hydrate the post, and uses it to walk reply chains — without
+    # it, federated replies stop at depth 1.
+    get "/posts/:id", PostObjectController, :show
+
+    # DM note object. 404s for public GETs so DM contents aren't
+    # publicly resolvable; the URL exists only as a stable opaque
+    # identifier for peers. Uses /dm/ (not /messages/) to avoid
+    # colliding with the SvelteKit conversation-detail route which
+    # would render an empty page when someone dereferences a DM URL.
+    get "/dm/:id", DmObjectController, :show
   end
 
   # Server-rendered OG/social-sharing shells for crawlers. Browser requests

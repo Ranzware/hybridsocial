@@ -284,10 +284,7 @@ defmodule Hybridsocial.Federation.Publisher do
     url == "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}/followers"
   end
 
-  defp local_url?(url) do
-    base = HybridsocialWeb.Endpoint.url()
-    String.starts_with?(url, base)
-  end
+  defp local_url?(url), do: Hybridsocial.Federation.LocalUrl.local_url?(url)
 
   defp batch_by_shared_inbox(inbox_urls) do
     # Group inboxes by domain and prefer shared inboxes when available

@@ -38,10 +38,46 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
     end
   end
 
+  @doc """
+  POST /api/v1/statuses/by_ids
+  Body: {ids: [uuid, ...]}
+
+  Batch-fetch up to 100 posts by ID. Used by the client-side "Seen
+  posts today" history page so it can render many posts without
+  making one request per entry. Missing or soft-deleted IDs are
+  omitted from the response; the caller is expected to reconcile
+  against their own list.
+  """
+  def by_ids(conn, params) do
+    ids =
+      case params do
+        %{"ids" => ids} when is_list(ids) -> ids
+        _ -> []
+      end
+
+    viewer_id = current_identity_id(conn)
+
+    posts =
+      ids
+      |> Posts.list_posts_by_ids()
+      |> Enum.filter(&Posts.viewer_can_read?(&1, viewer_id))
+
+    json(conn, Enum.map(posts, &serialize_post(conn, &1)))
+  end
+
   # GET /api/v1/statuses/:id
   def show(conn, %{"id" => id}) do
-    case Posts.get_post_with_context(id) do
+    viewer_id =
+      case conn.assigns[:current_identity] do
+        %{id: vid} -> vid
+        _ -> nil
+      end
+
+    case Posts.get_post_with_context_for_viewer(id, viewer_id) do
       nil ->
+        # 404 both for missing and for "you can't see this" — we
+        # don't want probing to distinguish "post doesn't exist"
+        # from "this is a direct post not addressed to you".
         conn
         |> put_status(:not_found)
         |> json(%{error: "status.not_found"})
@@ -111,7 +147,9 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
 
   # GET /api/v1/statuses/:id/history
   def history(conn, %{"id" => id}) do
-    case Posts.get_post(id) do
+    viewer_id = current_identity_id(conn)
+
+    case Posts.get_post_for_viewer(id, viewer_id) do
       nil ->
         conn
         |> put_status(:not_found)
@@ -131,8 +169,9 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
   # POST /api/v1/statuses/:id/translate
   def translate(conn, %{"id" => id} = params) do
     target_lang = params["target_lang"] || "en"
+    viewer_id = current_identity_id(conn)
 
-    case Posts.get_post(id) do
+    case Posts.get_post_for_viewer(id, viewer_id) do
       nil ->
         conn |> put_status(:not_found) |> json(%{error: "status.not_found"})
 
@@ -162,33 +201,44 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
   def reactions(conn, %{"id" => id}) do
     import Ecto.Query
 
-    reactions =
-      Hybridsocial.Social.Reaction
-      |> where([r], r.post_id == ^id)
-      |> preload(:identity)
-      |> Hybridsocial.Repo.all()
+    viewer_id = current_identity_id(conn)
 
-    grouped =
-      reactions
-      |> Enum.group_by(& &1.type)
-      |> Enum.map(fn {type, entries} ->
-        %{
-          type: type,
-          count: length(entries),
-          accounts:
-            Enum.map(entries, fn r ->
-              %{
-                id: r.identity.id,
-                handle: r.identity.handle,
-                display_name: r.identity.display_name,
-                avatar_url: r.identity.avatar_url
-              }
-            end)
-        }
-      end)
-      |> Enum.sort_by(& &1.count, :desc)
+    case Posts.get_post_for_viewer(id, viewer_id) do
+      nil ->
+        # Match `show`: uniform 404 so enumerating reactions can't
+        # confirm the existence of a direct post the viewer isn't
+        # party to.
+        conn |> put_status(:not_found) |> json(%{error: "status.not_found"})
 
-    json(conn, grouped)
+      _post ->
+        reactions =
+          Hybridsocial.Social.Reaction
+          |> where([r], r.post_id == ^id)
+          |> preload(:identity)
+          |> Hybridsocial.Repo.all()
+
+        grouped =
+          reactions
+          |> Enum.group_by(& &1.type)
+          |> Enum.map(fn {type, entries} ->
+            %{
+              type: type,
+              count: length(entries),
+              accounts:
+                Enum.map(entries, fn r ->
+                  %{
+                    id: r.identity.id,
+                    handle: r.identity.handle,
+                    display_name: r.identity.display_name,
+                    avatar_url: r.identity.avatar_url
+                  }
+                end)
+            }
+          end)
+          |> Enum.sort_by(& &1.count, :desc)
+
+        json(conn, grouped)
+    end
   end
 
   # POST /api/v1/statuses/:id/react
@@ -269,7 +319,6 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
 
     case Posts.boost(id, identity.id) do
       {:ok, _boost} ->
-        # Return the original post with updated counts
         post = Posts.get_post(id)
 
         conn
@@ -280,6 +329,14 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
         conn
         |> put_status(:not_found)
         |> json(%{error: "status.not_found"})
+
+      {:error, :boost_not_allowed} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{
+          error: "status.boost_not_allowed",
+          message: "This post's audience can't be widened by a boost."
+        })
 
       {:error, changeset} ->
         conn
@@ -309,8 +366,26 @@ defmodule HybridsocialWeb.Api.V1.StatusController do
   def context(conn, %{"id" => id}) do
     identity_id = current_identity_id(conn)
 
+    # Gate at the thread root: if the focused post is a direct one the
+    # viewer isn't party to, don't leak its ancestors or replies.
+    case Posts.get_post_for_viewer(id, identity_id) do
+      nil ->
+        conn |> put_status(:not_found) |> json(%{error: "status.not_found"})
+
+      _post ->
+        fetch_thread(conn, id, identity_id)
+    end
+  end
+
+  defp fetch_thread(conn, id, identity_id) do
     case Posts.get_thread(id) do
       {:ok, %{ancestors: ancestors, descendants: descendants}} ->
+        # Strip any post the viewer can't read — keeps direct replies
+        # scoped to their audience even though the thread-root check
+        # already gated entry.
+        ancestors = Enum.filter(ancestors, &Posts.viewer_can_read?(&1, identity_id))
+        descendants = Enum.filter(descendants, &Posts.viewer_can_read?(&1, identity_id))
+
         serialized_ancestors =
           PostSerializer.serialize_many(ancestors, current_identity_id: identity_id)
 

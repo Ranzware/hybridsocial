@@ -452,4 +452,67 @@ defmodule Hybridsocial.MessagingTest do
       assert Messaging.can_dm?(alice.id, bob.id) == false
     end
   end
+
+  describe "edit_message/3 — 5-minute window" do
+    setup do
+      Ecto.Adapters.SQL.Sandbox.mode(Hybridsocial.Repo, {:shared, self()})
+      start_supervised!(Hybridsocial.Config.Store)
+      :ok
+    end
+
+    test "succeeds within the window" do
+      alice = create_user("em_a", "em_a@example.com")
+      bob = create_user("em_b", "em_b@example.com")
+      {:ok, conv} = Messaging.find_or_create_direct(alice.id, bob.id)
+      {:ok, msg} = Messaging.send_message(conv.id, alice.id, %{"content" => "first draft"})
+
+      assert {:ok, edited} = Messaging.edit_message(msg.id, alice.id, "second draft")
+      assert edited.content == "second draft"
+      assert edited.edited_at != nil
+    end
+
+    test "rejects after the configured window has elapsed" do
+      alice = create_user("em_a2", "em_a2@example.com")
+      bob = create_user("em_b2", "em_b2@example.com")
+      {:ok, conv} = Messaging.find_or_create_direct(alice.id, bob.id)
+      {:ok, msg} = Messaging.send_message(conv.id, alice.id, %{"content" => "old"})
+
+      backdated = DateTime.add(DateTime.utc_now(), -10 * 60, :second)
+
+      Hybridsocial.Repo.update_all(
+        Ecto.Query.from(m in Hybridsocial.Messaging.Message, where: m.id == ^msg.id),
+        set: [created_at: backdated]
+      )
+
+      assert {:error, :edit_window_expired} =
+               Messaging.edit_message(msg.id, alice.id, "trying anyway")
+    end
+
+    test "respects an admin-changed window via dm_edit_window_seconds config" do
+      alice = create_user("em_a3", "em_a3@example.com")
+      bob = create_user("em_b3", "em_b3@example.com")
+      {:ok, conv} = Messaging.find_or_create_direct(alice.id, bob.id)
+      {:ok, msg} = Messaging.send_message(conv.id, alice.id, %{"content" => "x"})
+
+      Hybridsocial.Config.set("dm_edit_window_seconds", 1)
+      backdated = DateTime.add(DateTime.utc_now(), -5, :second)
+
+      Hybridsocial.Repo.update_all(
+        Ecto.Query.from(m in Hybridsocial.Messaging.Message, where: m.id == ^msg.id),
+        set: [created_at: backdated]
+      )
+
+      assert {:error, :edit_window_expired} =
+               Messaging.edit_message(msg.id, alice.id, "y")
+    end
+
+    test "rejects edit attempts from non-senders" do
+      alice = create_user("em_a4", "em_a4@example.com")
+      bob = create_user("em_b4", "em_b4@example.com")
+      {:ok, conv} = Messaging.find_or_create_direct(alice.id, bob.id)
+      {:ok, msg} = Messaging.send_message(conv.id, alice.id, %{"content" => "alice's"})
+
+      assert {:error, :forbidden} = Messaging.edit_message(msg.id, bob.id, "stolen")
+    end
+  end
 end

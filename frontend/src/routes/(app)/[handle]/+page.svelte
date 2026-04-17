@@ -6,7 +6,7 @@
   import { lookupAccount, getRelationship, follow, unfollow, block, unblock, mute, unmute } from '$lib/api/accounts.js';
   import { getAccountStatuses } from '$lib/api/statuses.js';
   import { api } from '$lib/api/client.js';
-  import { authStore, isStaffMember } from '$lib/stores/auth.js';
+  import { authStore, currentUser, isStaffMember } from '$lib/stores/auth.js';
   import ProfileHeader from '$lib/components/profile/ProfileHeader.svelte';
   import AdminProfileActions from '$lib/components/admin/AdminProfileActions.svelte';
   import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -15,7 +15,7 @@
   import Skeleton from '$lib/components/ui/Skeleton.svelte';
 
   let handle = $state('');
-  let account: Identity | null = $state(null);
+  let account = $state<Identity | null>(null);
   let relationship: Relationship | null = $state(null);
   let posts: Post[] = $state([]);
   let loading = $state(true);
@@ -24,7 +24,21 @@
   let cursor: string | null = $state(null);
   let error: string | null = $state(null);
   let activeTab = $state('posts');
-  let isOwnProfile = $state(false);
+
+  // Reactive identity of the signed-in user. Snapshotting
+  // `get(authStore)` inside `loadProfile` races with auth
+  // hydration — on first navigation the store can still be empty
+  // when the profile finishes loading, which left the Direct tab
+  // hidden on the user's own profile. Subscribing keeps this in
+  // sync regardless of ordering.
+  let viewerId = $state<string | null>(null);
+  currentUser.subscribe((u) => {
+    viewerId = u?.id ?? null;
+  });
+
+  let isOwnProfile = $derived(
+    account !== null && viewerId !== null && account.id === viewerId,
+  );
   let confirmAction: 'block' | 'unblock' | 'mute' | 'unmute' | null = $state(null);
   let familiarFollowers = $state<Identity[]>([]);
   let vouchStatus = $state<{ count: number; required: number; vouches: any[] } | null>(null);
@@ -59,9 +73,9 @@
       account = await lookupAccount(handle);
       retryCount = 0;
       const auth = get(authStore);
-      isOwnProfile = auth.user?.id === account.id;
+      const ownProfile = !!account && !!auth.user && auth.user.id === account.id;
 
-      if (!isOwnProfile && auth.user) {
+      if (!ownProfile && auth.user) {
         relationship = await getRelationship(account.id);
         // Load familiar followers and vouch status
         try {
@@ -203,8 +217,31 @@
 
   onMount(() => {
     loadProfile();
-    return () => unsub();
+
+    window.addEventListener('chat-event', handleRealtimeEvent as EventListener);
+    return () => {
+      window.removeEventListener('chat-event', handleRealtimeEvent as EventListener);
+      unsub();
+    };
   });
+
+  // Direct-post SSE fan-out. Fires for every direct post the viewer
+  // is a participant of, whether they authored it locally or it
+  // was just ingested from a federated peer. We only prepend when
+  // the Direct tab is the active one — otherwise the post already
+  // shows up the next time the user switches tabs (loadPosts runs
+  // on tab change).
+  function handleRealtimeEvent(ev: Event) {
+    const detail = (ev as CustomEvent<{ type: string; data: Post }>).detail;
+    if (!detail || detail.type !== 'direct.new_post') return;
+    if (activeTab !== 'direct') return;
+    if (!isOwnProfile) return;
+
+    const incoming = detail.data;
+    // Dedupe against optimistic local inserts.
+    if (posts.some((p) => p.id === incoming.id)) return;
+    posts = [incoming, ...posts];
+  }
 
   // Reload when tab changes (not on initial mount)
   let prevTab = $state(activeTab);

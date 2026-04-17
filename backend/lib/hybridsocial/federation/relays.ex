@@ -63,13 +63,54 @@ defmodule Hybridsocial.Federation.Relays do
   end
 
   @doc """
-  Processes an Announce activity from a relay.
-  In a full implementation, this would fetch and re-index the announced post.
-  For now, returns :ok as a stub.
+  Processes an Announce activity received from a relay. The relay
+  re-publishes content from instances we don't directly federate
+  with — typical use case is "Mastodon Relay" instances that fan
+  out posts across smaller instances.
+
+  We extract the announced object URL, dereference it through the
+  standard inbox path so it gets MRF + content-filter treatment, and
+  rely on the inbox's get_post_by_ap_id check to dedupe if we've
+  already seen the post via another route.
   """
-  def process_relay_announce(_activity) do
-    :ok
+  def process_relay_announce(activity) do
+    case activity do
+      %{"actor" => relay_actor, "object" => object_url} when is_binary(object_url) ->
+        # Confirm the announcing actor is a registered relay before
+        # accepting the announced post — otherwise any actor could
+        # spam our inbox with arbitrary URLs.
+        if known_relay?(relay_actor) do
+          Hybridsocial.Federation.ObjectResolver.resolve(object_url)
+        else
+          {:error, :unknown_relay}
+        end
+
+      _ ->
+        {:error, :invalid_announce}
+    end
   end
+
+  # Relays in our DB are stored by inbox_url. The relay's actor URL
+  # typically lives on the same host (e.g. inbox at
+  # https://relay.example/inbox, actor at https://relay.example/actor).
+  # Match by host so we don't have to track a second column.
+  defp known_relay?(actor_url) when is_binary(actor_url) do
+    case URI.parse(actor_url) do
+      %URI{host: host} when is_binary(host) and host != "" ->
+        host_pattern = "%//#{host}/%"
+
+        Repo.exists?(
+          from(r in Relay,
+            where: like(r.inbox_url, ^host_pattern) and r.status == "accepted"
+          )
+        )
+
+      _ ->
+        false
+    end
+  end
+
+  defp known_relay?(_), do: false
 
   @doc """
   Gets a relay by ID.

@@ -25,6 +25,12 @@ defmodule Hybridsocial.Messaging.Message do
     field :edited_at, :utc_datetime_usec
     field :created_at, :utc_datetime_usec
     field :deleted_at, :utc_datetime_usec
+
+    # ActivityPub URL for this message. Local messages: `{base}/dm/{id}`;
+    # messages ingested from remote peers: the peer's `object.id`. Drives
+    # outbound `inReplyTo` chaining (so Mastodon threads our DMs
+    # properly in its private-mentions view) and inbound idempotency.
+    field :ap_id, :string
   end
 
   @doc """
@@ -36,6 +42,7 @@ defmodule Hybridsocial.Messaging.Message do
   def encrypted_changeset(message, attrs) do
     message
     |> cast(attrs, [
+      :id,
       :conversation_id,
       :sender_id,
       :ciphertext,
@@ -43,7 +50,8 @@ defmodule Hybridsocial.Messaging.Message do
       :encryption_version,
       :content_type,
       :media_id,
-      :reply_to_id
+      :reply_to_id,
+      :ap_id
     ])
     |> validate_required([:conversation_id, :sender_id, :ciphertext, :nonce, :encryption_version])
     |> validate_inclusion(:content_type, @valid_content_types)
@@ -51,6 +59,7 @@ defmodule Hybridsocial.Messaging.Message do
     |> foreign_key_constraint(:sender_id)
     |> foreign_key_constraint(:media_id)
     |> foreign_key_constraint(:reply_to_id)
+    |> unique_constraint(:ap_id, name: :messages_ap_id_index)
   end
 
   @doc "Edit changeset for an encrypted message. Re-encrypts before calling."

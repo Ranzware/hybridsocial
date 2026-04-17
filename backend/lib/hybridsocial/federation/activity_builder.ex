@@ -4,7 +4,18 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
   """
 
   @public "https://www.w3.org/ns/activitystreams#Public"
-  @context "https://www.w3.org/ns/activitystreams"
+
+  # JSON-LD `@context` MUST be an array (or single object) per the
+  # spec. Mastodon's strict JSON-LD parser rejects scalar strings —
+  # interop tests against a real Mastodon instance fail with
+  # "@context: invalid context" if you ship a bare string. We include
+  # the security context (httpsig key publication uses it) so this
+  # matches what Mastodon emits and what every other AP implementation
+  # expects.
+  @context [
+    "https://www.w3.org/ns/activitystreams",
+    "https://w3id.org/security/v1"
+  ]
 
   # --- Create ---
 
@@ -48,7 +59,9 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
 
   def build_delete(post) do
     post = maybe_preload(post, :identity)
+    post = if post.visibility == "direct", do: preload_mentions(post), else: post
     actor_url = actor_url(post.identity)
+    {to, cc} = determine_addressing(post)
 
     %{
       "@context" => @context,
@@ -56,14 +69,24 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
       "type" => "Delete",
       "actor" => actor_url,
       "published" => format_datetime(DateTime.utc_now()),
-      "to" => [@public],
-      "cc" => [followers_url(post.identity)],
+      # Mirror the Create's audience — broadcasting a Delete wider
+      # than the original post would leak that a private thread
+      # existed. For public posts this is still Public+followers
+      # (same as before). For direct, it's the mention list only.
+      "to" => to,
+      "cc" => cc,
       "object" => %{
         "id" => post_url(post.id),
         "type" => "Tombstone"
       }
     }
   end
+
+  defp preload_mentions(%{mentions: %Ecto.Association.NotLoaded{}} = post) do
+    Hybridsocial.Repo.preload(post, mentions: :identity)
+  end
+
+  defp preload_mentions(post), do: post
 
   # --- Follow ---
 
@@ -114,13 +137,21 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
   # --- Like ---
 
   def build_like(identity, post) do
+    post = maybe_preload(post, :identity)
     actor_url = actor_url(identity)
+    author_url = actor_url(post.identity)
 
+    # A Like is a private signal to the post's author; it doesn't
+    # need (and shouldn't have) broader addressing. For a direct
+    # post, addressing a Like to `AS:Public` would leak the fact
+    # the recipient reacted to a private message. Restricting `to`
+    # to the author keeps the scope matched to the post.
     %{
       "@context" => @context,
       "id" => activity_id(identity.id, "like", post.id),
       "type" => "Like",
       "actor" => actor_url,
+      "to" => [author_url],
       "object" => post_url(post.id)
     }
   end
@@ -232,7 +263,13 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
 
   # --- Note builder ---
 
-  defp build_note(post) do
+  @doc """
+  Builds the Note/Article/Question JSON-LD object for a post. Exposed
+  so the `/posts/:id` AP endpoint can serve the same shape that
+  Create/Update activities embed as their `object` — lets remote
+  peers dereference the post URL and get the same bytes.
+  """
+  def build_note(post) do
     {to, cc} = determine_addressing(post)
 
     note = %{
@@ -251,6 +288,24 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
       "attachment" => build_attachments(post),
       "url" => post_url(post.id)
     }
+
+    # Direct-visibility posts participate in a "conversation" thread on
+    # Mastodon-class peers. They use the `conversation`/`context`
+    # string as an opaque grouping key in the DM column; without it
+    # each of our replies appears as a standalone status. The URI
+    # doesn't need to dereference — it's just a stable ID derived from
+    # the thread root.
+    note =
+      if post.visibility == "direct" do
+        thread_uri = conversation_uri_for(post)
+
+        note
+        |> Map.put("conversation", thread_uri)
+        |> Map.put("context", thread_uri)
+        |> Map.put("directMessage", true)
+      else
+        note
+      end
 
     # Add contentMap for language-tagged content
     note =
@@ -301,13 +356,89 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
   defp determine_addressing(post) do
     followers = followers_url(post.identity)
 
-    case post.visibility do
-      "public" -> {[@public], [followers]}
-      "followers" -> {[followers], []}
-      "direct" -> {[], []}
-      _ -> {[@public], [followers]}
+    # Base audience per visibility. Anything this doesn't match
+    # (group/list/unknown) is NOT federated — returning empty lists
+    # signals the Publisher to noop rather than default to Public,
+    # which would silently widen the audience of a visibility we
+    # don't know how to translate to ActivityStreams.
+    #
+    #   public    → addressed AS:Public, cc'd to followers.
+    #   unlisted  → addressed to followers, AS:Public in cc. This
+    #               is Mastodon's convention for "don't show in
+    #               public timelines but anyone with the URL can
+    #               read." Swapping to/cc is what makes it so.
+    #   followers → addressed to followers collection only.
+    #   direct    → addressed to the explicit mention list only.
+    {base_to, base_cc} =
+      case post.visibility do
+        "public" -> {[@public], [followers]}
+        "unlisted" -> {[followers], [@public]}
+        "followers" -> {[followers], []}
+        "direct" -> {direct_recipients(post), []}
+        _ -> {[], []}
+      end
+
+    # Replies additionally address the parent author so their instance
+    # receives the reply activity via inbox push. Without this the
+    # parent's server never learns about the reply and our post never
+    # shows up in the remote thread view.
+    parent_author_url = parent_author_ap_url(post)
+
+    cc =
+      if parent_author_url && parent_author_url not in base_cc,
+        do: base_cc ++ [parent_author_url],
+        else: base_cc
+
+    {base_to, cc}
+  end
+
+  # Build the `to` list for a direct-visibility post: every identity
+  # recorded in `post_mentions` contributes its ap_actor_url (local or
+  # remote). Falls back to mention hrefs parsed from content if the
+  # mention rows aren't preloaded — defensive for paths that build the
+  # note outside the federation flow (e.g. the AP object endpoint).
+  defp direct_recipients(%{mentions: mentions}) when is_list(mentions) do
+    mentions
+    |> Enum.map(fn
+      %{identity: %{ap_actor_url: url}} when is_binary(url) -> url
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp direct_recipients(post) do
+    post.content
+    |> extract_mentions()
+    |> Enum.map(& &1["href"])
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  # Stable non-dereferenceable URI that groups all messages in a DM
+  # thread under one Mastodon "conversation". Derived from the thread
+  # root (top-level post in the reply chain) so reply depth doesn't
+  # matter — every post in the tree shares the same key.
+  defp conversation_uri_for(post) do
+    %URI{host: host} = URI.parse(base_url())
+    root_id = post.root_id || post.id
+    "tag:#{host},2026:objectId=#{root_id}:objectType=Conversation"
+  end
+
+  defp parent_author_ap_url(%{parent_id: parent_id}) when is_binary(parent_id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Social.Post, parent_id) do
+      %{identity_id: parent_identity_id} ->
+        case Hybridsocial.Repo.get(Hybridsocial.Accounts.Identity, parent_identity_id) do
+          %{ap_actor_url: ap_url} when is_binary(ap_url) -> ap_url
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
+
+  defp parent_author_ap_url(_), do: nil
 
   defp build_in_reply_to(%{parent_ap_id: ap_id}) when is_binary(ap_id), do: ap_id
 
@@ -340,26 +471,34 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
     end)
   end
 
-  defp extract_mentions(nil), do: []
-
   defp extract_mentions(content) do
-    Regex.scan(~r/@([a-zA-Z0-9_]+)(?:@([a-zA-Z0-9._-]+))?/, content)
-    |> Enum.map(fn
-      [_, handle, domain] ->
+    content
+    |> Hybridsocial.Federation.LocalUrl.parse_mentions()
+    |> Enum.map(fn {handle, domain} -> mention_tag(handle, domain) end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # Resolve a parsed mention to a stored identity and build the AP
+  # tag. Drops mentions we can't resolve rather than emitting a
+  # guessed URL — an unrecognized `href` means the remote server
+  # won't deliver, and a local guess could accidentally point at a
+  # different account with the same handle.
+  defp mention_tag(handle, domain) do
+    case Hybridsocial.Federation.LocalUrl.resolve_mention(handle, domain) do
+      %Hybridsocial.Accounts.Identity{ap_actor_url: url} when is_binary(url) ->
         %{
           "type" => "Mention",
-          "href" => "https://#{domain}/@#{handle}",
-          "name" => "@#{handle}@#{domain}"
+          "href" => url,
+          "name" => mention_name(handle, domain)
         }
 
-      [_, handle] ->
-        %{
-          "type" => "Mention",
-          "href" => "#{base_url()}/@#{handle}",
-          "name" => "@#{handle}"
-        }
-    end)
+      _ ->
+        nil
+    end
   end
+
+  defp mention_name(handle, nil), do: "@#{handle}"
+  defp mention_name(handle, domain), do: "@#{handle}@#{domain}"
 
   defp build_emoji_tags(nil), do: []
 

@@ -19,7 +19,7 @@
   );
 
   let displayName = $derived(
-    otherParticipants.map((p) => p.display_name || p.handle).join(', ') || 'Unknown'
+    otherParticipants.map((p) => p.display_name || p.acct || p.handle).join(', ') || 'Unknown'
   );
 
   let avatarUser = $derived(otherParticipants[0] ?? null);

@@ -59,6 +59,19 @@ defmodule Hybridsocial.Social do
             Logger.debug(
               "Skipping federation: follower=#{inspect(!!follower)} remote=#{inspect(remote?(target))} ap_url=#{inspect(target.ap_actor_url)}"
             )
+
+            # Local-to-local follow: no federation needed, but the
+            # target still deserves a bell. Remote targets get their
+            # bell via the peer's own inbox delivery of the Follow
+            # activity, so we skip notifying here in that case.
+            if not remote?(target) do
+              type = if status == :pending, do: "follow_request", else: "follow"
+              Hybridsocial.Notifications.create_notification(%{
+                recipient_id: followee_id,
+                actor_id: follower_id,
+                type: type
+              })
+            end
           end
 
         _ ->

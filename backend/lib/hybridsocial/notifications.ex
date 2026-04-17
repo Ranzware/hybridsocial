@@ -31,6 +31,7 @@ defmodule Hybridsocial.Notifications do
 
         case result do
           {:ok, notification} ->
+            broadcast_to_user(notification)
             maybe_deliver(notification, attrs, actor_id)
             {:ok, notification}
 
@@ -38,6 +39,32 @@ defmodule Hybridsocial.Notifications do
             error
         end
     end
+  end
+
+  # Fires the notification out over the user's SSE stream so the bell
+  # badge + list update without a poll. Done at the central creation
+  # point so every type that lands in the DB automatically reaches the
+  # frontend; call sites don't need to remember to broadcast.
+  defp broadcast_to_user(%Notification{} = notification) do
+    notification = Repo.preload(notification, :actor)
+
+    Phoenix.PubSub.broadcast(
+      Hybridsocial.PubSub,
+      "user:#{notification.recipient_id}",
+      %{event: "notification", payload: serialize_for_stream(notification)}
+    )
+  end
+
+  defp serialize_for_stream(%Notification{} = n) do
+    %{
+      id: n.id,
+      type: n.type,
+      read: n.read,
+      target_type: n.target_type,
+      target_id: n.target_id,
+      created_at: n.inserted_at,
+      actor: HybridsocialWeb.Helpers.Account.serialize_summary(n.actor)
+    }
   end
 
   def list_notifications(identity_id, opts \\ []) do

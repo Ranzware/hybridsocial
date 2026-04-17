@@ -1,0 +1,29 @@
+# CrowdSec profiles — decide what happens when a scenario fires.
+#
+# Each new ban is (a) added to the local decision DB so the Caddy
+# bouncer drops the IP, AND (b) routed to the email_default notifier,
+# which buffers and digests them per the 10-minute group_wait.
+#
+# Decisions remain in effect until they expire on their own — we
+# don't break the chain after notify, so future re-bans on the same
+# IP also produce notifications.
+
+name: default_ip_remediation
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Ip"
+decisions:
+  - type: ban
+    duration: 4h
+notifications:
+  - email_default
+on_success: continue
+---
+name: default_range_remediation
+filters:
+  - Alert.Remediation == true && Alert.GetScope() == "Range"
+decisions:
+  - type: ban
+    duration: 4h
+notifications:
+  - email_default
+on_success: continue

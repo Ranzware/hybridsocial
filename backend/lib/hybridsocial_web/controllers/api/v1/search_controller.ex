@@ -1,6 +1,8 @@
 defmodule HybridsocialWeb.Api.V1.SearchController do
   use HybridsocialWeb, :controller
 
+  require Logger
+
   alias Hybridsocial.Search
   alias HybridsocialWeb.Serializers.PostSerializer
   import HybridsocialWeb.Helpers.Pagination, only: [clamp_limit: 1]
@@ -27,12 +29,17 @@ defmodule HybridsocialWeb.Api.V1.SearchController do
         account_id: account_id
       )
 
-    # If resolve=true and query looks like a remote handle, try WebFinger
+    # If resolve=true and the query is a fully-qualified `@user@domain`,
+    # we trigger a federation lookup unless the local DB already
+    # contains an EXACT (user, domain) match. Substring matches don't
+    # count — searching `@ahmad@bassam.social` shouldn't be satisfied
+    # by a cached `ahmad@mastodon.social` or a local `ahmad`.
     accounts =
-      if resolve and looks_like_remote_handle?(query) and results.accounts == [] do
+      if resolve and looks_like_remote_handle?(query) and
+           not exact_remote_match?(query, results.accounts) do
         case resolve_remote_account(query) do
-          {:ok, identity} -> [identity]
-          _ -> []
+          {:ok, identity} -> [identity | results.accounts]
+          _ -> results.accounts
         end
       else
         results.accounts
@@ -58,12 +65,73 @@ defmodule HybridsocialWeb.Api.V1.SearchController do
     Regex.match?(~r/^[\w.-]+@[\w.-]+\.\w+$/, cleaned)
   end
 
+  @doc false
+  # Returns true iff one of the supplied identities corresponds
+  # exactly to the `user@domain` in `query` (matches both the
+  # username and the host of `ap_actor_url`). Local handles never
+  # count as a match for a domain-qualified query.
+  def exact_remote_match?(query, identities) when is_list(identities) do
+    expected = String.trim(query) |> String.trim_leading("@") |> String.downcase()
+
+    Enum.any?(identities, fn identity ->
+      case HybridsocialWeb.Helpers.Account.build_acct(identity) do
+        acct when is_binary(acct) ->
+          # Local accounts return just the bare handle (no @domain).
+          # A domain-qualified query can never match those.
+          String.contains?(acct, "@") and String.downcase(acct) == expected
+
+        _ ->
+          false
+      end
+    end)
+  end
+
   defp resolve_remote_account(query) do
     acct = String.trim(query) |> String.trim_leading("@")
 
-    # Try WebFinger first (standard), then fallback to Mastodon API lookup
-    with {:error, _} <- resolve_via_webfinger(acct) do
-      resolve_via_api_lookup(acct)
+    # Three-stage fallback chain. Each stage logs its outcome so
+    # operators can trace federation problems without grep-debugging.
+    cond_result =
+      cond_walk([
+        {"webfinger", fn -> resolve_via_webfinger(acct) end},
+        {"api_lookup", fn -> resolve_via_api_lookup(acct) end},
+        {"actor_convention", fn -> resolve_via_actor_convention(acct) end}
+      ])
+
+    case cond_result do
+      {:ok, identity, stage} ->
+        Logger.info(
+          "[search] resolved remote account acct=#{acct} via=#{stage} id=#{identity.id}"
+        )
+
+        {:ok, identity}
+
+      {:error, attempts} ->
+        Logger.warning(
+          "[search] could not resolve remote account acct=#{acct} attempts=#{inspect(attempts)}"
+        )
+
+        {:error, :not_found}
+    end
+  end
+
+  # Walks a list of {stage_name, thunk} pairs, returning the first
+  # successful {:ok, identity, stage} or {:error, attempts} where
+  # attempts is a [{stage, reason}] list of every failure.
+  defp cond_walk(stages), do: cond_walk(stages, [])
+
+  defp cond_walk([], attempts), do: {:error, Enum.reverse(attempts)}
+
+  defp cond_walk([{stage, thunk} | rest], attempts) do
+    case thunk.() do
+      {:ok, identity} ->
+        {:ok, identity, stage}
+
+      {:error, reason} ->
+        cond_walk(rest, [{stage, reason} | attempts])
+
+      other ->
+        cond_walk(rest, [{stage, other} | attempts])
     end
   end
 
@@ -96,18 +164,81 @@ defmodule HybridsocialWeb.Api.V1.SearchController do
               with :ok <- Hybridsocial.Security.UrlValidator.validate(actor_url) do
                 Inbox.resolve_or_create_remote_identity(actor_url)
               else
-                _ -> {:error, :not_found}
+                _ -> {:error, :url_validation_failed}
               end
 
             _ ->
-              {:error, :not_found}
+              {:error, :api_response_missing_url}
           end
 
-        _ ->
-          {:error, :not_found}
+        {:ok, %{status_code: status}} ->
+          {:error, {:api_status, status}}
+
+        {:error, reason} ->
+          {:error, {:api_error, reason}}
       end
     else
-      _ -> {:error, :not_found}
+      _ -> {:error, :domain_validation_failed}
+    end
+  end
+
+  # Last-resort: assume the canonical /users/{user} URL pattern that
+  # Mastodon, Pleroma, Akkoma and Misskey all expose, and dereference
+  # the actor JSON directly. Lets us federate with instances whose
+  # WebFinger and Mastodon-API discovery are both broken (e.g.
+  # bassam.social, where nginx swallows /.well-known/* before it
+  # reaches Pleroma).
+  #
+  # We *probe* the URL before calling resolve_or_create — that
+  # function unconditionally inserts an identity stub on first sight,
+  # and we don't want to pollute the DB with rows for guessed URLs
+  # that don't actually exist.
+  defp resolve_via_actor_convention(acct) do
+    [user, domain] = String.split(acct, "@", parts: 2)
+
+    with :ok <- Hybridsocial.Security.UrlValidator.validate_domain(domain) do
+      actor_url = "https://#{domain}/users/#{URI.encode(user)}"
+
+      with :ok <- Hybridsocial.Security.UrlValidator.validate(actor_url),
+           {:ok, _actor_json} <- probe_actor_json(actor_url),
+           {:ok, identity} <- Inbox.resolve_or_create_remote_identity(actor_url) do
+        {:ok, identity}
+      else
+        {:error, reason} -> {:error, {:actor_convention, reason}}
+        _ -> {:error, :actor_convention_failed}
+      end
+    else
+      _ -> {:error, :domain_validation_failed}
+    end
+  end
+
+  # Confirms the URL actually serves an ActivityPub actor before we
+  # commit a row to the DB.
+  defp probe_actor_json(url) do
+    headers = [
+      {"Accept", "application/activity+json, application/ld+json"},
+      {"User-Agent", "HybridSocial/0.1.0"}
+    ]
+
+    case HTTPoison.get(url, headers,
+           recv_timeout: 10_000,
+           timeout: 10_000,
+           follow_redirect: true
+         ) do
+      {:ok, %{status_code: 200, body: body}} ->
+        with {:ok, json} <- Jason.decode(body),
+             type when type in ~w(Person Organization Group Service Application) <-
+               json["type"] do
+          {:ok, json}
+        else
+          _ -> {:error, :not_an_actor}
+        end
+
+      {:ok, %{status_code: status}} ->
+        {:error, {:probe_status, status}}
+
+      {:error, reason} ->
+        {:error, {:probe_error, reason}}
     end
   end
 

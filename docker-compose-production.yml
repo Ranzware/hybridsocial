@@ -145,6 +145,9 @@ services:
       # Instance actor keys (for federation signing)
       INSTANCE_PUBLIC_KEY: ${INSTANCE_PUBLIC_KEY:-}
       INSTANCE_PRIVATE_KEY: ${INSTANCE_PRIVATE_KEY:-}
+      # ClamAV scanning is configured via the admin panel (DB-backed):
+      # set clamav_enabled=true once the clamav service is healthy.
+      # Defaults route to the in-network clamav:3310 service.
     volumes:
       - uploads:/app/uploads
     networks:
@@ -173,10 +176,34 @@ services:
     ports:
       - "3000:3000"
 
-  # ---- Reverse Proxy ----
+  # ---- Antivirus (scans media uploads before storage) ----
+
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: hs_clamav
+    restart: unless-stopped
+    environment:
+      # Disable freshclam scheduling inside the container; the image
+      # runs an initial signature pull on first start (~5 min). For
+      # ongoing updates, rely on the cron in clamav/clamav.
+      CLAMAV_NO_FRESHCLAMD: "false"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    networks:
+      - internal
+
+  # ---- Reverse Proxy + WAF ----
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
     container_name: hs_caddy
     restart: unless-stopped
     ports:
@@ -186,13 +213,53 @@ services:
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
       MEDIA_DOMAIN: ${MEDIA_DOMAIN:-}
+      CROWDSEC_BOUNCER_CADDY_KEY: ${CROWDSEC_BOUNCER_CADDY_KEY:?Run 'sh docker/generate-secrets.sh .env' first}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - caddy_logs:/var/log/caddy
     depends_on:
-      - backend
-      - frontend
+      backend:
+        condition: service_started
+      frontend:
+        condition: service_started
+      crowdsec:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ---- Behavioral IP filtering ----
+
+  crowdsec:
+    image: crowdsecurity/crowdsec:latest
+    container_name: hs_crowdsec
+    restart: unless-stopped
+    environment:
+      COLLECTIONS: "crowdsecurity/caddy crowdsecurity/http-cve crowdsecurity/base-http-scenarios crowdsecurity/linux"
+      # Pre-register the bouncer key on first boot so Caddy can
+      # authenticate immediately (no manual `cscli bouncers add`).
+      BOUNCER_KEY_caddy: ${CROWDSEC_BOUNCER_CADDY_KEY:?Run 'sh docker/generate-secrets.sh .env' first}
+      # Email notifier reuses the app's SMTP config.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-noreply@${DOMAIN}}
+      CROWDSEC_NOTIFY_EMAIL_TO: ${CROWDSEC_NOTIFY_EMAIL_TO:-}
+    volumes:
+      - caddy_logs:/var/log/caddy:ro
+      - crowdsec_data:/var/lib/crowdsec/data
+      - crowdsec_config:/etc/crowdsec
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
+      - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
+      - ./crowdsec/notifications/email.yaml:/etc/crowdsec/notifications/email.yaml:ro
+    healthcheck:
+      test: ["CMD", "cscli", "lapi", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - internal
 
@@ -204,6 +271,10 @@ volumes:
   uploads:
   caddy_data:
   caddy_config:
+  caddy_logs:
+  clamav_data:
+  crowdsec_data:
+  crowdsec_config:
 
 networks:
   internal:

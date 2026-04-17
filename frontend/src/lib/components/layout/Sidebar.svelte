@@ -4,13 +4,16 @@
   import Badge from '$lib/components/ui/Badge.svelte';
   import { currentUser } from '$lib/stores/auth.js';
   import { unreadCount } from '$lib/stores/notifications.js';
+  import { dmUnreadTotal } from '$lib/stores/dm-unread.js';
   import type { Identity } from '$lib/api/types.js';
 
   let user: Identity | null = $state(null);
   let notifCount = $state(0);
+  let dmCount = $state(0);
 
   currentUser.subscribe((v) => (user = v));
   unreadCount.subscribe((v) => (notifCount = v));
+  dmUnreadTotal.subscribe((v) => (dmCount = v));
 
   interface NavItem {
     href: string;
@@ -23,7 +26,7 @@
     { href: '/home', label: 'Home', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
     { href: '/explore', label: 'Explore', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
     { href: '/notifications', label: 'Notifications', icon: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9', badge: () => notifCount },
-    { href: '/messages', label: 'Messages', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
+    { href: '/messages', label: 'Messages', icon: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z', badge: () => dmCount },
     { href: '/lists', label: 'Lists', icon: 'M4 6h16M4 10h16M4 14h16M4 18h16' },
     { href: '/groups', label: 'Groups', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
     { href: '/pages', label: 'Pages', icon: 'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10' },
@@ -51,16 +54,20 @@
             class:active={isActive(item.href)}
             aria-current={isActive(item.href) ? 'page' : undefined}
           >
-            <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d={item.icon} />
-            </svg>
-            <span class="nav-label">{item.label}</span>
-            {#if item.badge}
-              {@const badgeCount = item.badge()}
-              {#if badgeCount > 0}
-                <Badge count={badgeCount} variant="danger" />
+            <span class="nav-icon-wrap">
+              <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d={item.icon} />
+              </svg>
+              {#if item.badge}
+                {@const badgeCount = item.badge()}
+                {#if badgeCount > 0}
+                  <span class="nav-badge-wrap">
+                    <Badge count={badgeCount} variant="danger" />
+                  </span>
+                {/if}
               {/if}
-            {/if}
+            </span>
+            <span class="nav-label">{item.label}</span>
           </a>
         </li>
       {/each}
@@ -130,6 +137,30 @@
 
   .nav-icon {
     flex-shrink: 0;
+  }
+
+  .nav-icon-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* Always anchor the badge to the icon's top-right corner. In
+     expanded mode this keeps it tied to the icon (consistent with
+     the topbar bell); in compact/icon-only mode it prevents the
+     pill from bulging out the sidebar row. The small translate
+     overlaps the corner rather than sitting flush. */
+  .nav-badge-wrap {
+    position: absolute;
+    top: -4px;
+    inset-inline-end: -8px;
+    /* Shrink the pill a touch so it reads as an icon annotation
+       rather than a full-size chip. */
+    transform: scale(0.85);
+    transform-origin: top right;
+    pointer-events: none;
   }
 
   .sidebar-user {

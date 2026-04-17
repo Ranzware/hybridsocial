@@ -145,26 +145,39 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
             _ -> nil
           end
 
-        opts = [
-          limit: clamp_limit(params["limit"]),
-          exclude_replies: params["exclude_replies"] == "true",
-          only_media: params["only_media"] == "true",
-          only_direct: params["only_direct"] == "true",
-          max_id: params["max_id"]
-        ]
+        only_direct = params["only_direct"] == "true"
 
-        posts =
-          Hybridsocial.Social.Posts.posts_by_identity(id, opts)
-          |> then(fn p -> if is_list(p), do: p, else: [] end)
+        cond do
+          # Direct posts are recipient-scoped — never let another user
+          # pull someone else's direct inbox by forging this query
+          # param. The UI only surfaces this filter on own-profile
+          # anyway, so this is a defense-in-depth check against API
+          # abuse.
+          only_direct and viewer_id != id ->
+            conn |> put_status(:forbidden) |> json(%{error: "direct_tab.forbidden"})
 
-        serialized =
-          HybridsocialWeb.Serializers.PostSerializer.serialize_many(posts,
-            current_identity_id: viewer_id
-          )
+          true ->
+            opts = [
+              limit: clamp_limit(params["limit"]),
+              exclude_replies: params["exclude_replies"] == "true",
+              only_media: params["only_media"] == "true",
+              only_direct: only_direct,
+              max_id: params["max_id"]
+            ]
 
-        conn
-        |> put_status(:ok)
-        |> json(serialized)
+            posts =
+              Hybridsocial.Social.Posts.posts_by_identity(id, opts)
+              |> then(fn p -> if is_list(p), do: p, else: [] end)
+
+            serialized =
+              HybridsocialWeb.Serializers.PostSerializer.serialize_many(posts,
+                current_identity_id: viewer_id
+              )
+
+            conn
+            |> put_status(:ok)
+            |> json(serialized)
+        end
     end
   end
 
@@ -390,8 +403,9 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
 
     %{
       id: identity.id,
-      type: identity.type,
+      type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
       handle: identity.handle,
+      acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
       display_name: identity.display_name,
       bio: identity.bio,
       avatar_url: identity.avatar_url,
@@ -770,6 +784,16 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
             "Save this code somewhere safe. It will not be shown again. " <>
               "If you lose both your password and this code, your account " <>
               "cannot be recovered."
+        })
+
+      {:error, :two_factor_required} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{
+          error: "recovery.two_factor_required",
+          message:
+            "Two-factor authentication must be enabled before generating a " <>
+              "recovery code. Enable 2FA in security settings, then try again."
         })
 
       {:error, :invalid_password} ->

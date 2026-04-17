@@ -115,19 +115,12 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
   # ---------------------------------------------------------------------------
 
   defp serialize_notification(notification) do
-    actor = notification.actor
-
     %{
       id: notification.id,
       type: notification.type,
       created_at: notification.inserted_at,
       read: notification.read,
-      account: %{
-        id: actor.id,
-        handle: actor.handle,
-        display_name: actor.display_name,
-        avatar_url: actor.avatar_url
-      },
+      account: HybridsocialWeb.Helpers.Account.serialize_summary(notification.actor),
       target_type: notification.target_type,
       target_id: notification.target_id
     }
@@ -135,7 +128,21 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
 
   defp parse_list(nil), do: nil
   defp parse_list(list) when is_list(list), do: list
-  defp parse_list(val) when is_binary(val), do: [val]
+
+  defp parse_list(val) when is_binary(val) do
+    # Accept both `types[]=a&types[]=b` (arrives as a list already)
+    # and `types=a,b,c` (comma-joined, which is what our frontend's
+    # query-string helper produces). Without splitting, the whole
+    # comma string becomes one unmatched enum value.
+    val
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> case do
+      [] -> nil
+      list -> list
+    end
+  end
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

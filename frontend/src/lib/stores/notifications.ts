@@ -19,6 +19,9 @@ export const unreadCount = derived(notificationStore, ($s) => $s.unreadCount);
 export const notifications = derived(notificationStore, ($s) => $s.items);
 
 let eventSource: EventSource | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
+let onlineListener: (() => void) | null = null;
 
 export function setNotifications(items: Notification[]): void {
   const unread = items.filter((n) => !n.read).length;
@@ -41,13 +44,41 @@ export function markRead(id: string): void {
   }));
 }
 
+/**
+ * Flip every visible notification to read + zero the unread counter
+ * without dropping the items from the list. Used by the /notifications
+ * page on mount so the bell badge clears as soon as the user arrives,
+ * while the list itself still shows the unread-highlight styling for
+ * items the user hasn't clicked individually.
+ */
+export function markAllLocal(): void {
+  notificationStore.update((s) => ({
+    items: s.items.map((n) => ({ ...n, read: true })),
+    unreadCount: 0,
+    loading: s.loading,
+  }));
+}
+
 export function clearAll(): void {
   notificationStore.set({ items: [], unreadCount: 0, loading: false });
 }
 
 export function connectNotificationStream(apiBase: string): void {
   if (!browser) return;
-  disconnectNotificationStream();
+  stopReconnectTimer();
+  closeEventSource();
+
+  // Listen once for the browser's "back online" event — as soon as
+  // the OS reports connectivity we retry immediately instead of
+  // waiting out the backoff timer.
+  if (!onlineListener) {
+    onlineListener = () => {
+      reconnectAttempts = 0;
+      stopReconnectTimer();
+      connectNotificationStream(apiBase);
+    };
+    window.addEventListener('online', onlineListener);
+  }
 
   // SSE streaming — auth via httpOnly cookie (withCredentials sends cookies cross-origin)
   try {
@@ -58,29 +89,62 @@ export function connectNotificationStream(apiBase: string): void {
       try {
         const notification: Notification = JSON.parse(event.data);
         addNotification(notification);
+        // Fire the bell sound. The sound module self-gates on user
+        // preference + audio unlock state, so nothing plays until the
+        // user has interacted with the page and opted in.
+        import('./sound.js').then((m) => m.playNotificationSound());
       } catch {
         // Ignore malformed events
       }
     });
 
     eventSource.onopen = () => {
+      reconnectAttempts = 0;
       serverReachable.set(true);
     };
 
     eventSource.onerror = () => {
       serverReachable.set(false);
-      disconnectNotificationStream();
-      // Attempt reconnect after 10s
-      setTimeout(() => connectNotificationStream(apiBase), 10_000);
+      closeEventSource();
+      scheduleReconnect(apiBase);
     };
   } catch {
     // EventSource creation failed — silently ignore
   }
 }
 
-export function disconnectNotificationStream(): void {
+function scheduleReconnect(apiBase: string): void {
+  stopReconnectTimer();
+  // Exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 30s. Starts
+  // aggressive so brief hiccups recover in ~1s instead of 10.
+  const delay = Math.min(30_000, 1000 * 2 ** reconnectAttempts);
+  reconnectAttempts += 1;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectNotificationStream(apiBase);
+  }, delay);
+}
+
+function stopReconnectTimer(): void {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function closeEventSource(): void {
   if (eventSource) {
     eventSource.close();
     eventSource = null;
   }
+}
+
+export function disconnectNotificationStream(): void {
+  stopReconnectTimer();
+  closeEventSource();
+  if (onlineListener) {
+    window.removeEventListener('online', onlineListener);
+    onlineListener = null;
+  }
+  reconnectAttempts = 0;
 }

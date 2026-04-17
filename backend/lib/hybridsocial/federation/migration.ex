@@ -145,16 +145,22 @@ defmodule Hybridsocial.Federation.Migration do
     end
   end
 
+  # Validates that the migration target acknowledges this account as
+  # one of its prior aliases. Per Mastodon's Move handling, the
+  # destination actor's `alsoKnownAs` array MUST contain the source
+  # actor URL — otherwise anyone could claim to be the "new home" for
+  # any account.
+  #
+  # If we already know the target (resolved via prior federation) we
+  # check the cached `also_known_as` directly. Otherwise we fetch the
+  # target actor JSON over HTTPS and inspect its `alsoKnownAs` field
+  # before accepting the move.
   defp verify_target_also_known_as(target_ap_id, identity) do
-    # In production, this would fetch the target actor and check their alsoKnownAs field.
-    # For now, we check if we have the target locally and verify their alsoKnownAs.
     actor_url = identity.ap_actor_url
 
     case Repo.one(from(i in Identity, where: i.ap_actor_url == ^target_ap_id)) do
       nil ->
-        # Remote target - in production we'd fetch and verify.
-        # For now, we trust the migration and return :ok
-        :ok
+        verify_remote_target_also_known_as(target_ap_id, actor_url)
 
       target_identity ->
         also_known_as = target_identity.also_known_as || []
@@ -167,6 +173,39 @@ defmodule Hybridsocial.Federation.Migration do
     end
   end
 
+  defp verify_remote_target_also_known_as(target_ap_id, source_actor_url) do
+    headers = [
+      {"Accept", "application/activity+json"},
+      {"User-Agent", "HybridSocial/0.1.0 (federation/migration)"}
+    ]
+
+    case HTTPoison.get(target_ap_id, headers,
+           timeout: 10_000,
+           recv_timeout: 10_000,
+           follow_redirect: true,
+           max_body_length: 100_000
+         ) do
+      {:ok, %{status_code: 200, body: body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"alsoKnownAs" => aka}} when is_list(aka) ->
+            if source_actor_url in aka do
+              :ok
+            else
+              {:error, :target_not_linked}
+            end
+
+          {:ok, _} ->
+            {:error, :target_missing_alsoKnownAs}
+
+          _ ->
+            {:error, :invalid_target_actor}
+        end
+
+      _ ->
+        {:error, :target_unreachable}
+    end
+  end
+
   defp set_moved_to(identity, target_ap_id) do
     identity
     |> Ecto.Changeset.change(moved_to: target_ap_id)
@@ -175,7 +214,7 @@ defmodule Hybridsocial.Federation.Migration do
 
   defp publish_move(identity, target_ap_id) do
     activity = %{
-      "@context" => "https://www.w3.org/ns/activitystreams",
+      "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
       "id" => "#{identity.ap_actor_url}#moves/#{System.system_time(:millisecond)}",
       "type" => "Move",
       "actor" => identity.ap_actor_url,

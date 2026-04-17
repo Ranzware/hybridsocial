@@ -1,0 +1,18 @@
+# Caddy WAF pipeline snippet — included by site blocks that want
+# full WAF + IP filtering. Order: CrowdSec first (cheapest, drops
+# known-bad IPs immediately), then Coraza (deep inspection on
+# whatever survives).
+#
+# Site blocks that should bypass the WAF (media file server, the
+# WebSocket streaming endpoint) simply don't `import` this file.
+
+crowdsec
+
+coraza_waf {
+	directives `
+		Include /etc/caddy/coraza/coraza.conf
+		Include /etc/caddy/coraza/crs-setup.conf
+		Include /etc/caddy/coraza/crs-tuning.conf
+		Include /etc/caddy/coraza/rules/*.conf
+	`
+}

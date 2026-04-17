@@ -6,17 +6,42 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
 
   defp register(handle) do
     uniq = :erlang.unique_integer([:positive])
+    email = "#{handle}_#{uniq}@test.com"
 
     {:ok, identity} =
       Accounts.register_user(%{
         "handle" => "#{handle}_#{uniq}",
-        "email" => "#{handle}_#{uniq}@test.com",
+        "email" => email,
         "display_name" => handle,
         "password" => "password1234567890",
         "password_confirmation" => "password1234567890"
       })
 
-    identity
+    {identity, email}
+  end
+
+  defp enable_2fa(identity) do
+    user = Repo.get_by!(User, identity_id: identity.id)
+    raw_secret = NimbleTOTP.secret()
+    encoded = Base.encode32(raw_secret, padding: false)
+
+    {:ok, user} =
+      user
+      |> Ecto.Changeset.change(otp_secret: encoded, otp_enabled: true)
+      |> Repo.update()
+
+    {user, raw_secret}
+  end
+
+  defp totp_code(secret), do: NimbleTOTP.verification_code(secret)
+
+  defp validate_params(identity, current_email, code, otp) do
+    %{
+      "handle" => identity.handle,
+      "recovery_code" => code,
+      "otp_code" => otp,
+      "current_email" => current_email
+    }
   end
 
   describe "RecoveryCode.generate/0" do
@@ -31,8 +56,6 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
     end
 
     test "draws from an unambiguous alphabet (no 0/1/I/L/O/U)" do
-      # Generate many codes and verify the alphabet doesn't contain the
-      # common look-alike characters.
       banned = MapSet.new(["0", "1", "I", "L", "O", "U"])
 
       for _ <- 1..50 do
@@ -65,8 +88,9 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
   end
 
   describe "Accounts.generate_recovery_code/2" do
-    test "stores a hash and returns plaintext once" do
-      identity = register("gen_user")
+    test "stores a hash and returns plaintext once (2FA enabled)" do
+      {identity, _email} = register("gen_user")
+      {_user, _secret} = enable_2fa(identity)
 
       assert {:ok, code, updated} =
                Accounts.generate_recovery_code(identity.id, "password1234567890")
@@ -75,13 +99,19 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
       assert String.length(code) == 23
       assert updated.recovery_code_hash != nil
       refute updated.recovery_code_hash == code
-
-      # And the returned hash verifies against the plaintext.
       assert RecoveryCode.verify(code, updated.recovery_code_hash)
     end
 
+    test "requires 2FA to be enabled" do
+      {identity, _email} = register("no_2fa")
+
+      assert {:error, :two_factor_required} =
+               Accounts.generate_recovery_code(identity.id, "password1234567890")
+    end
+
     test "rotates: old code stops working after a regeneration" do
-      identity = register("rotate_user")
+      {identity, _email} = register("rotate_user")
+      {_user, _secret} = enable_2fa(identity)
 
       {:ok, old_code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
@@ -94,14 +124,16 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
     end
 
     test "rejects a wrong password" do
-      identity = register("wrongpw")
+      {identity, _email} = register("wrongpw")
+      {_user, _secret} = enable_2fa(identity)
       assert {:error, :invalid_password} = Accounts.generate_recovery_code(identity.id, "not-it")
     end
   end
 
   describe "Accounts.clear_recovery_code/2" do
     test "nulls out the hash" do
-      identity = register("clr_user")
+      {identity, _email} = register("clr_user")
+      {_user, _secret} = enable_2fa(identity)
       {:ok, _, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       assert {:ok, updated} = Accounts.clear_recovery_code(identity.id, "password1234567890")
@@ -109,87 +141,175 @@ defmodule Hybridsocial.Accounts.RecoveryCodeTest do
     end
 
     test "rejects without password" do
-      identity = register("clr_wrongpw")
+      {identity, _email} = register("clr_wrongpw")
+      {_user, _secret} = enable_2fa(identity)
       {:ok, _, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       assert {:error, :invalid_password} = Accounts.clear_recovery_code(identity.id, "nope")
     end
   end
 
-  describe "Accounts.recover_account/4" do
-    test "resets password and auto-rotates the code on success" do
-      identity = register("recover_ok")
+  describe "Accounts.validate_recovery_factors/1" do
+    test "returns {:ok, identity} when all four factors match" do
+      {identity, current_email} = register("vrf_ok")
+      {_user, secret} = enable_2fa(identity)
       {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
-      assert {:ok, new_code, recovered} =
-               Accounts.recover_account(
-                 identity.handle,
-                 code,
-                 "newpassword1234567890",
-                 "newpassword1234567890"
+      assert {:ok, got} =
+               Accounts.validate_recovery_factors(
+                 validate_params(identity, current_email, code, totp_code(secret))
                )
 
-      # A new code is issued, different from the one just used.
-      refute new_code == code
-      assert recovered.recovered_at != nil
-      assert recovered.recovery_code_last_used_at != nil
+      assert got.id == identity.id
+    end
 
-      # Old code no longer works.
-      assert {:error, :invalid_credentials} =
-               Accounts.recover_account(
-                 identity.handle,
-                 code,
-                 "anotherpass1234567890",
-                 "anotherpass1234567890"
+    test "accepts current email case-insensitively and with whitespace" do
+      {identity, current_email} = register("vrf_ci")
+      {_user, secret} = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+
+      assert {:ok, _} =
+               Accounts.validate_recovery_factors(
+                 validate_params(
+                   identity,
+                   "  #{String.upcase(current_email)}  ",
+                   code,
+                   totp_code(secret)
+                 )
                )
-
-      # New password logs in; old one doesn't.
-      user = Repo.get_by!(User, identity_id: identity.id)
-      assert Bcrypt.verify_pass("newpassword1234567890", user.password_hash)
-      refute Bcrypt.verify_pass("password1234567890", user.password_hash)
     end
 
     test "rejects wrong code" do
-      identity = register("recover_wrong")
+      {identity, current_email} = register("vrf_wc")
+      {_user, secret} = enable_2fa(identity)
       {:ok, _code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       assert {:error, :invalid_credentials} =
-               Accounts.recover_account(
-                 identity.handle,
-                 RecoveryCode.generate(),
-                 "newpassword1234567890",
-                 "newpassword1234567890"
+               Accounts.validate_recovery_factors(
+                 validate_params(
+                   identity,
+                   current_email,
+                   RecoveryCode.generate(),
+                   totp_code(secret)
+                 )
                )
     end
 
-    test "rejects when identity has no code set" do
-      identity = register("no_code")
+    test "rejects wrong OTP" do
+      {identity, current_email} = register("vrf_wo")
+      {_user, _secret} = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       assert {:error, :invalid_credentials} =
-               Accounts.recover_account(
-                 identity.handle,
-                 RecoveryCode.generate(),
-                 "newpassword1234567890",
-                 "newpassword1234567890"
+               Accounts.validate_recovery_factors(
+                 validate_params(identity, current_email, code, "000000")
+               )
+    end
+
+    test "rejects wrong current email" do
+      {identity, _email} = register("vrf_we")
+      {_user, secret} = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+
+      assert {:error, :invalid_credentials} =
+               Accounts.validate_recovery_factors(
+                 validate_params(identity, "not-the-real@test.com", code, totp_code(secret))
                )
     end
 
     test "rejects unknown handle" do
       assert {:error, :invalid_credentials} =
-               Accounts.recover_account(
-                 "definitelynotarealhandle",
-                 RecoveryCode.generate(),
+               Accounts.validate_recovery_factors(%{
+                 "handle" => "definitelynotreal",
+                 "recovery_code" => RecoveryCode.generate(),
+                 "otp_code" => "123456",
+                 "current_email" => "ghost@test.com"
+               })
+    end
+
+    test "rejects when any required field is missing" do
+      assert {:error, :invalid_credentials} =
+               Accounts.validate_recovery_factors(%{
+                 "handle" => "whoever",
+                 "recovery_code" => "code"
+               })
+    end
+
+    test "rejects when 2FA not enabled on the account" do
+      {identity, current_email} = register("vrf_n2fa")
+      code = RecoveryCode.generate()
+
+      identity
+      |> Ecto.Changeset.change(%{recovery_code_hash: RecoveryCode.hash(code)})
+      |> Repo.update!()
+
+      assert {:error, :invalid_credentials} =
+               Accounts.validate_recovery_factors(
+                 validate_params(identity, current_email, code, "123456")
+               )
+    end
+  end
+
+  describe "Accounts.complete_recovery/4" do
+    test "resets password + email and auto-rotates the code on success" do
+      {identity, _current_email} = register("cr_ok")
+      {_user, _secret} = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+
+      uniq = :erlang.unique_integer([:positive])
+      new_email = "cr_ok_#{uniq}_new@test.com"
+
+      assert {:ok, new_code, recovered} =
+               Accounts.complete_recovery(
+                 identity.id,
+                 new_email,
+                 "newpassword1234567890",
+                 "newpassword1234567890"
+               )
+
+      refute new_code == code
+      assert recovered.recovered_at != nil
+      assert recovered.recovery_code_last_used_at != nil
+
+      user = Repo.get_by!(User, identity_id: identity.id)
+      assert user.email == new_email
+      assert Bcrypt.verify_pass("newpassword1234567890", user.password_hash)
+      refute Bcrypt.verify_pass("password1234567890", user.password_hash)
+      assert user.confirmed_at != nil
+    end
+
+    test "rejects weak new password with :invalid_input" do
+      {identity, _current_email} = register("cr_weak")
+
+      assert {:error, :invalid_input, _cs} =
+               Accounts.complete_recovery(
+                 identity.id,
+                 "cr_weak_new@test.com",
+                 "short",
+                 "short"
+               )
+    end
+
+    test "rejects invalid email with :invalid_input" do
+      {identity, _current_email} = register("cr_bad")
+
+      assert {:error, :invalid_input, _cs} =
+               Accounts.complete_recovery(
+                 identity.id,
+                 "not-an-email",
                  "newpassword1234567890",
                  "newpassword1234567890"
                )
     end
 
-    test "rejects weak new password" do
-      identity = register("weak_pw")
-      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
-
-      assert {:error, :invalid_password, _cs} =
-               Accounts.recover_account(identity.handle, code, "short", "short")
+    test "rejects unknown identity_id with :not_found" do
+      assert {:error, :not_found} =
+               Accounts.complete_recovery(
+                 Ecto.UUID.generate(),
+                 "ghost_new@test.com",
+                 "newpassword1234567890",
+                 "newpassword1234567890"
+               )
     end
   end
 

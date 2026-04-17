@@ -1,0 +1,8 @@
+# Log sources CrowdSec ingests. The `caddy` collection parses the
+# Caddy JSON access logs; we pull both the main site log and the
+# media-domain log so brute-force scans against either are noticed.
+filenames:
+  - /var/log/caddy/access.log
+  - /var/log/caddy/media-access.log
+labels:
+  type: caddy

@@ -79,8 +79,39 @@ defmodule Hybridsocial.Federation.RelaysTest do
   end
 
   describe "process_relay_announce/1" do
-    test "returns :ok (stub)" do
-      assert :ok = Relays.process_relay_announce(%{"type" => "Announce"})
+    test "rejects malformed announces (no actor / no object URL)" do
+      assert {:error, :invalid_announce} =
+               Relays.process_relay_announce(%{"type" => "Announce"})
+
+      assert {:error, :invalid_announce} =
+               Relays.process_relay_announce(%{"actor" => "https://r.example/actor"})
+    end
+
+    test "rejects announces from unknown (unaccepted) relay actors" do
+      # No matching relay row exists, so this hostname is unknown.
+      assert {:error, :unknown_relay} =
+               Relays.process_relay_announce(%{
+                 "actor" => "https://stranger.example/actor",
+                 "object" => "https://stranger.example/posts/1"
+               })
+    end
+
+    test "accepts announces from a registered relay (host-matched)" do
+      {:ok, _} =
+        Relays.subscribe_to_relay("https://approved-relay.example/inbox", Ecto.UUID.generate())
+
+      {:ok, _} = Relays.accept_relay("approved-relay.example")
+
+      # Object dereference will fail (network), but we verify the
+      # call gets PAST the known_relay? gate by checking the error
+      # isn't :unknown_relay.
+      result =
+        Relays.process_relay_announce(%{
+          "actor" => "https://approved-relay.example/actor",
+          "object" => "https://approved-relay.example/posts/1"
+        })
+
+      refute result == {:error, :unknown_relay}
     end
   end
 end

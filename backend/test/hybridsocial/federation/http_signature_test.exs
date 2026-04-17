@@ -100,4 +100,72 @@ defmodule Hybridsocial.Federation.HTTPSignatureTest do
       assert :public_key.verify(signing_string, :sha256, signature, pub_key)
     end
   end
+
+  describe "verify/1 — date-header freshness" do
+    # The full signature path requires an HTTP fetch of the public
+    # key, so we exercise the date check in isolation by building a
+    # minimal conn whose Date header lies about the request time and
+    # asserting the appropriate error short-circuits the with chain.
+    # We expect the date check to come first — before keyId fetch.
+
+    defp conn_with_date(date_str) do
+      %Plug.Conn{
+        method: "POST",
+        request_path: "/inbox",
+        req_headers: [
+          {"signature",
+           ~s|keyId="https://nope.invalid/actor#main-key",algorithm="rsa-sha256",headers="(request-target) host date",signature="ZmFrZQ=="|},
+          {"date", date_str},
+          {"host", "local.example"}
+        ]
+      }
+    end
+
+    test "rejects a missing Date header" do
+      conn = %Plug.Conn{
+        method: "POST",
+        request_path: "/inbox",
+        req_headers: [
+          {"signature",
+           ~s|keyId="x",algorithm="rsa-sha256",headers="(request-target)",signature="ZmFrZQ=="|}
+        ]
+      }
+
+      assert {:error, :date_missing} = HTTPSignature.verify(conn)
+    end
+
+    test "rejects a Date header older than 12 hours" do
+      stale =
+        DateTime.utc_now()
+        |> DateTime.add(-13 * 3600, :second)
+        |> Calendar.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+      assert {:error, :date_too_old} = HTTPSignature.verify(conn_with_date(stale))
+    end
+
+    test "rejects a Date header in the future by more than 12 hours" do
+      future =
+        DateTime.utc_now()
+        |> DateTime.add(13 * 3600, :second)
+        |> Calendar.strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+      assert {:error, :date_too_skewed} = HTTPSignature.verify(conn_with_date(future))
+    end
+
+    test "rejects an unparseable Date header" do
+      assert {:error, :date_invalid} = HTTPSignature.verify(conn_with_date("not a date"))
+    end
+
+    test "passes the freshness gate for a Date within 12h (then fails on keyId fetch)" do
+      fresh = Calendar.strftime(DateTime.utc_now(), "%a, %d %b %Y %H:%M:%S GMT")
+
+      # A fresh date passes the freshness check, then the verify chain
+      # tries to fetch the public key from the (intentionally invalid)
+      # keyId host — which fails. We assert the failure is anything OTHER
+      # than the date errors, proving the gate let it through.
+      result = HTTPSignature.verify(conn_with_date(fresh))
+      assert {:error, reason} = result
+      refute reason in [:date_missing, :date_too_old, :date_too_skewed, :date_invalid]
+    end
+  end
 end

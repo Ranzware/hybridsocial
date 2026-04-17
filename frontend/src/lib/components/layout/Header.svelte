@@ -4,6 +4,7 @@
   import Dropdown from '$lib/components/ui/Dropdown.svelte';
   import { currentUser, isLoggedIn, clearAuth } from '$lib/stores/auth.js';
   import { unreadCount } from '$lib/stores/notifications.js';
+  import { dmUnreadTotal } from '$lib/stores/dm-unread.js';
   import { api } from '$lib/api/client.js';
   import type { Identity } from '$lib/api/types.js';
 
@@ -14,10 +15,12 @@
   let searchInputEl: HTMLInputElement | undefined = $state();
   let searchHoverTimer: ReturnType<typeof setTimeout> | null = null;
   let notifCount = $state(0);
+  let dmCount = $state(0);
 
   currentUser.subscribe((v) => (user = v));
   isLoggedIn.subscribe((v) => (authenticated = v));
   unreadCount.subscribe((v) => (notifCount = v));
+  dmUnreadTotal.subscribe((v) => (dmCount = v));
 
   function handleSearch(e: Event) {
     e.preventDefault();
@@ -34,27 +37,51 @@
     setTimeout(() => searchInputEl?.focus(), 50);
   }
 
+  // Called from `onblur` on the input. Previously collapsed eagerly
+  // on every blur which destroyed typed text the moment the user
+  // clicked a dropdown item / an autocomplete suggestion. The new
+  // contract: blur alone never closes — the search stays put while
+  // the user has typed something. They can still dismiss explicitly
+  // via Escape or by submitting.
   function collapseSearch() {
-    if (!searchQuery.trim()) {
+    if (!searchQuery.trim() && !isMouseOverSearch) {
+      searchExpanded = false;
+    }
+  }
+
+  // Escape key dismisses — lets users back out without a submit.
+  function handleSearchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      searchQuery = '';
       searchExpanded = false;
     }
   }
 
   let searchCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let isMouseOverSearch = $state(false);
 
   function handleSearchHoverOut() {
+    isMouseOverSearch = false;
+
     if (searchHoverTimer) {
       clearTimeout(searchHoverTimer);
       searchHoverTimer = null;
     }
+    // Keep the search open when there's any text — nothing the user
+    // typed should vanish because of mouse movement. Only the
+    // empty-state hover bubble auto-closes.
     if (searchExpanded && !searchQuery.trim()) {
       searchCloseTimer = setTimeout(() => {
-        searchExpanded = false;
-      }, 100);
+        if (!searchQuery.trim()) {
+          searchExpanded = false;
+        }
+      }, 200);
     }
   }
 
   function handleSearchHoverIn() {
+    isMouseOverSearch = true;
+
     if (searchCloseTimer) {
       clearTimeout(searchCloseTimer);
       searchCloseTimer = null;
@@ -111,6 +138,7 @@
             class="search-input"
             aria-label="Search"
             onblur={collapseSearch}
+            onkeydown={handleSearchKeydown}
           />
         </form>
       {:else}
@@ -145,6 +173,9 @@
             <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
             <polyline points="22,6 12,13 2,6" />
           </svg>
+          {#if dmCount > 0}
+            <span class="icon-badge">{dmCount > 99 ? '99+' : dmCount}</span>
+          {/if}
         </a>
 
         <!-- User avatar dropdown -->

@@ -6,9 +6,11 @@ defmodule Hybridsocial.Feeds do
   import Ecto.Query
 
   alias Hybridsocial.Repo
+  alias Hybridsocial.Accounts.Identity
   alias Hybridsocial.Social.{Post, Follow, Block, Boost, List, ListMember}
   alias Hybridsocial.Feeds.Visibility
   alias Hybridsocial.Feeds.AlgorithmResolver
+  alias Hybridsocial.Federation.LocalUrl
   alias Hybridsocial.Cache.FeedCache
 
   @default_limit 20
@@ -68,7 +70,12 @@ defmodule Hybridsocial.Feeds do
     * `:local_only`      - only local posts (default true, reserved for federation)
   """
   def public_timeline(opts \\ []) do
-    if cacheable?(opts) do
+    local_only = Keyword.get(opts, :local_only, true)
+
+    # Only the default (local_only=true) path is cached — the cache
+    # key is a single "feed:public" slot, so mixing in non-local
+    # results would poison the local tab for everyone.
+    if local_only and cacheable?(opts) do
       case safe_cache_get(fn -> FeedCache.get_public_timeline() end) do
         nil ->
           result = fetch_public_timeline(opts)
@@ -86,6 +93,7 @@ defmodule Hybridsocial.Feeds do
   defp fetch_public_timeline(opts) do
     limit = parse_limit(opts)
     include_replies = Keyword.get(opts, :include_replies, false)
+    local_only = Keyword.get(opts, :local_only, true)
     viewer_id = Keyword.get(opts, :viewer_id)
 
     query =
@@ -96,11 +104,28 @@ defmodule Hybridsocial.Feeds do
       |> apply_cursor_filters(opts)
       |> Visibility.apply_silence_filter()
       |> Visibility.apply_shadow_ban_filter(viewer_id)
+      |> maybe_filter_local(local_only)
       |> order_by([p], desc: p.inserted_at)
       |> limit(^limit)
       |> preload(:identity)
 
     Repo.all(query)
+  end
+
+  # Restrict a post query to authors hosted on this instance. Local
+  # identities have `ap_actor_url` starting with our actor prefix;
+  # remote ones have their origin host. Nil is treated as local so a
+  # freshly-created local row with a lazily-populated URL still
+  # surfaces on the local timeline.
+  defp maybe_filter_local(query, false), do: query
+
+  defp maybe_filter_local(query, true) do
+    pattern = LocalUrl.actor_prefix() <> "%"
+
+    from p in query,
+      join: i in Identity,
+      on: i.id == p.identity_id,
+      where: is_nil(i.ap_actor_url) or like(i.ap_actor_url, ^pattern)
   end
 
   # ---------------------------------------------------------------------------

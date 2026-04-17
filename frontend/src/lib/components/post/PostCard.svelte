@@ -56,6 +56,9 @@
   }
 
   import { matchFilters, type FilterResult } from '$lib/stores/content-filters.js';
+  import { markSeen } from '$lib/utils/seen-posts.js';
+  import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
+  import LazyMedia from '$lib/components/post/LazyMedia.svelte';
 
   let {
     post,
@@ -92,10 +95,14 @@
   let fullDate = $derived(fullDateTime(post.created_at));
 
   let avatarUrl = $derived(post.account.avatar_url || '');
-  let displayName = $derived(post.account.display_name || post.account.handle);
+  let displayName = $derived(post.account.display_name || post.account.acct || post.account.handle);
   let domain = $derived((post.account as any).domain as string | null);
   let isRemote = $derived(!!domain);
-  let handle = $derived(isRemote ? `@${post.account.handle}` : `@${post.account.handle}`);
+  // Prefer `acct` (already in webfinger form for remote accounts)
+  // over our internal munged handle. A remote user like
+  // `ahmad_bassamso_2e8909` renders as `@ahmad@bassam.social` —
+  // what the user actually typed / expects to see.
+  let handle = $derived('@' + (post.account.acct || post.account.handle));
   let instanceFavicon = $derived(domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : null);
 
   // Media grid class based on count
@@ -194,6 +201,7 @@
   }
 
   function navigateToPost() {
+    markSeen(post.id);
     window.location.href = `/post/${post.id}`;
   }
 
@@ -252,6 +260,7 @@
             {#if post.account.is_verified}
               <VerifiedBadge size="sm" />
             {/if}
+            <AccountTypeIndicator account={post.account} />
             {#if (post.account as any).badges}
               {#each (post.account as any).badges as badge (badge.type)}
                 <RoleBadge type={badge.type} label={badge.label} size="sm" />
@@ -305,6 +314,7 @@
               class:post-content-collapsed={contentCollapsed && contentOverflows}
               style={contentOverflows ? `max-height: ${contentCollapsed ? collapsedHeight : fullHeight}px` : ''}
               bind:this={contentEl}
+              dir="auto"
             >
               {@html post.content_html}
             </div>
@@ -314,8 +324,9 @@
               class:post-content-collapsed={contentCollapsed && contentOverflows}
               style={contentOverflows ? `max-height: ${contentCollapsed ? collapsedHeight : fullHeight}px` : ''}
               bind:this={contentEl}
+              dir="auto"
             >
-              <p>{post.content}</p>
+              <p dir="auto">{post.content}</p>
             </div>
           {/if}
           {#if contentOverflows && contentCollapsed}
@@ -334,37 +345,9 @@
           {#if mediaCount > 0 && !compact}
             <div class="media-grid {mediaGridClass}">
               {#each mediaAttachments as media (media.id)}
-                {#if media.type === 'image' || media.type === 'gifv'}
-                  <div class="media-item">
-                    <img
-                      src={media.preview_url || media.url}
-                      alt={media.description || ''}
-                      class="media-img"
-                      loading="lazy"
-                    />
-                  </div>
-                {:else if media.type === 'video'}
-                  <div class="media-item">
-                    <video
-                      src={media.url}
-                      controls
-                      preload="metadata"
-                      class="media-video"
-                      aria-label={media.description || 'Video attachment'}
-                    >
-                      <track kind="captions" />
-                    </video>
-                  </div>
-                {:else if media.type === 'audio'}
-                  <div class="media-item media-audio">
-                    <audio
-                      src={media.url}
-                      controls
-                      preload="metadata"
-                      aria-label={media.description || 'Audio attachment'}
-                    ></audio>
-                  </div>
-                {/if}
+                <div class="media-item" class:media-audio={media.type === 'audio'}>
+                  <LazyMedia {media} isRemote={!!media.remote_url} />
+                </div>
               {/each}
             </div>
           {/if}
@@ -893,6 +876,25 @@
     overflow: hidden;
   }
 
+  /* Per-paragraph auto direction so a post that mixes Arabic + English
+     paragraphs (or Hebrew, Persian, Urdu, etc.) flips each block
+     independently. `unicode-bidi: plaintext` tells the browser to
+     apply the first-strong-character algorithm PER element, which is
+     what `dir="auto"` on every paragraph would do without having to
+     rewrite the sanitizer's HTML. Numbers, URLs, and LTR tokens
+     inside the flipped paragraph still render left-to-right per the
+     Unicode Bidirectional Algorithm — this is a visual-only change,
+     not a character reversal. */
+  .post-content :global(p),
+  .post-content :global(li),
+  .post-content :global(blockquote),
+  .post-content :global(h1),
+  .post-content :global(h2),
+  .post-content :global(h3),
+  .post-content :global(h4) {
+    unicode-bidi: plaintext;
+  }
+
   .post-content-collapsed {
     -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
     mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
@@ -1306,26 +1308,10 @@
     aspect-ratio: 16 / 9;
   }
 
-  .media-grid-2 .media-img,
-  .media-grid-4 .media-img {
-    max-height: 220px;
-  }
-
-  .media-video {
-    width: 100%;
-    max-height: 400px;
-    display: block;
-    aspect-ratio: 16 / 9;
-  }
-
   .media-audio {
     padding: 12px;
     display: flex;
     align-items: center;
-  }
-
-  .media-audio audio {
-    width: 100%;
   }
 
   /* Poll */

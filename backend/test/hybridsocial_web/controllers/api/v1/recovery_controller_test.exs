@@ -2,21 +2,39 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
   use HybridsocialWeb.ConnCase, async: true
 
   alias Hybridsocial.Accounts
+  alias Hybridsocial.Accounts.User
+  alias Hybridsocial.Repo
 
   defp register(handle) do
     uniq = :erlang.unique_integer([:positive])
+    email = "#{handle}_#{uniq}@test.com"
 
     {:ok, identity} =
       Accounts.register_user(%{
         "handle" => "#{handle}_#{uniq}",
-        "email" => "#{handle}_#{uniq}@test.com",
+        "email" => email,
         "display_name" => handle,
         "password" => "password1234567890",
         "password_confirmation" => "password1234567890"
       })
 
-    identity
+    {identity, email}
   end
+
+  defp enable_2fa(identity) do
+    user = Repo.get_by!(User, identity_id: identity.id)
+    raw_secret = NimbleTOTP.secret()
+    encoded = Base.encode32(raw_secret, padding: false)
+
+    {:ok, _user} =
+      user
+      |> Ecto.Changeset.change(otp_secret: encoded, otp_enabled: true)
+      |> Repo.update()
+
+    raw_secret
+  end
+
+  defp totp_code(secret), do: NimbleTOTP.verification_code(secret)
 
   defp auth_conn(conn, identity) do
     {:ok, access_token, _claims} = Hybridsocial.Auth.Token.generate_access_token(identity.id)
@@ -24,8 +42,9 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
   end
 
   describe "POST /api/v1/accounts/recovery_code" do
-    test "authenticated user can generate a recovery code", %{conn: conn} do
-      identity = register("api_gen")
+    test "authenticated user with 2FA enabled can generate a code", %{conn: conn} do
+      {identity, _email} = register("api_gen")
+      enable_2fa(identity)
 
       conn =
         conn
@@ -38,8 +57,22 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
       assert body["warning"] =~ "cannot be recovered"
     end
 
+    test "rejects with 403 when 2FA is not enabled", %{conn: conn} do
+      {identity, _email} = register("api_no2fa")
+
+      conn =
+        conn
+        |> auth_conn(identity)
+        |> post("/api/v1/accounts/recovery_code", %{"password" => "password1234567890"})
+
+      body = json_response(conn, 403)
+      assert body["error"] == "recovery.two_factor_required"
+      assert body["message"] =~ "Two-factor"
+    end
+
     test "wrong password is rejected with 403", %{conn: conn} do
-      identity = register("api_gen_wrong")
+      {identity, _email} = register("api_g_wrong")
+      enable_2fa(identity)
 
       conn =
         conn
@@ -52,9 +85,9 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
 
   describe "GET /api/v1/accounts/recovery_code" do
     test "reports whether a code is set (no plaintext ever leaks)", %{conn: conn} do
-      identity = register("api_status")
+      {identity, _email} = register("api_status")
+      enable_2fa(identity)
 
-      # Before setting anything.
       conn1 = conn |> auth_conn(identity) |> get("/api/v1/accounts/recovery_code")
 
       assert json_response(conn1, 200) == %{
@@ -63,7 +96,6 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
                "last_used_at" => nil
              }
 
-      # After generating.
       {:ok, _, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       conn2 = build_conn() |> auth_conn(identity) |> get("/api/v1/accounts/recovery_code")
@@ -73,37 +105,69 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
     end
   end
 
-  describe "POST /api/v1/auth/recover" do
-    test "resets password and returns a new code", %{conn: conn} do
-      identity = register("api_recover")
+  describe "POST /api/v1/auth/recover/validate (step 1)" do
+    test "issues a signed recovery_token on success", %{conn: conn} do
+      {identity, current_email} = register("rv_ok")
+      secret = enable_2fa(identity)
       {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       conn =
-        post(conn, "/api/v1/auth/recover", %{
+        post(conn, "/api/v1/auth/recover/validate", %{
           "handle" => identity.handle,
           "recovery_code" => code,
-          "new_password" => "newpass1234567890xy",
-          "new_password_confirmation" => "newpass1234567890xy"
+          "otp_code" => totp_code(secret),
+          "current_email" => current_email
         })
 
       body = json_response(conn, 200)
       assert body["status"] == "ok"
-      assert is_binary(body["new_recovery_code"])
-      refute body["new_recovery_code"] == code
+      assert is_binary(body["recovery_token"])
+      assert body["expires_in"] == 600
     end
 
-    test "wrong code returns 401, no detail", %{conn: conn} do
-      identity = register("rec_wrong")
-      {:ok, _, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
-
-      bad = "A2345-B2345-C2345-D2345"
+    test "wrong code returns 401 with generic message", %{conn: conn} do
+      {identity, current_email} = register("rv_wc")
+      secret = enable_2fa(identity)
+      {:ok, _code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       conn =
-        post(conn, "/api/v1/auth/recover", %{
+        post(conn, "/api/v1/auth/recover/validate", %{
           "handle" => identity.handle,
-          "recovery_code" => bad,
-          "new_password" => "newpass1234567890xy",
-          "new_password_confirmation" => "newpass1234567890xy"
+          "recovery_code" => "A2345-B2345-C2345-D2345",
+          "otp_code" => totp_code(secret),
+          "current_email" => current_email
+        })
+
+      assert json_response(conn, 401)["error"] == "auth.invalid_recovery"
+    end
+
+    test "wrong OTP returns 401 with generic message", %{conn: conn} do
+      {identity, current_email} = register("rv_wo")
+      enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+
+      conn =
+        post(conn, "/api/v1/auth/recover/validate", %{
+          "handle" => identity.handle,
+          "recovery_code" => code,
+          "otp_code" => "000000",
+          "current_email" => current_email
+        })
+
+      assert json_response(conn, 401)["error"] == "auth.invalid_recovery"
+    end
+
+    test "wrong current email returns 401 with generic message", %{conn: conn} do
+      {identity, _email} = register("rv_we")
+      secret = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+
+      conn =
+        post(conn, "/api/v1/auth/recover/validate", %{
+          "handle" => identity.handle,
+          "recovery_code" => code,
+          "otp_code" => totp_code(secret),
+          "current_email" => "not-the-real@test.com"
         })
 
       assert json_response(conn, 401)["error"] == "auth.invalid_recovery"
@@ -111,25 +175,110 @@ defmodule HybridsocialWeb.Api.V1.RecoveryControllerTest do
 
     test "unknown handle returns 401 (not 404)", %{conn: conn} do
       conn =
-        post(conn, "/api/v1/auth/recover", %{
+        post(conn, "/api/v1/auth/recover/validate", %{
           "handle" => "totally-not-real",
           "recovery_code" => "A2345-B2345-C2345-D2345",
-          "new_password" => "newpass1234567890xy",
-          "new_password_confirmation" => "newpass1234567890xy"
+          "otp_code" => "123456",
+          "current_email" => "ghost@test.com"
         })
 
       assert json_response(conn, 401)["error"] == "auth.invalid_recovery"
     end
 
     test "missing params return 400", %{conn: conn} do
-      conn = post(conn, "/api/v1/auth/recover", %{"handle" => "x"})
-      assert json_response(conn, 400)["error"] == "validation.failed"
+      conn = post(conn, "/api/v1/auth/recover/validate", %{"handle" => "x"})
+      body = json_response(conn, 400)
+      assert body["error"] == "validation.failed"
+      assert "recovery_code" in body["required"]
+      assert "otp_code" in body["required"]
+      assert "current_email" in body["required"]
+    end
+  end
+
+  describe "POST /api/v1/auth/recover/complete (step 2)" do
+    defp validate_and_get_token(conn, identity, current_email, code, secret) do
+      post_conn =
+        post(conn, "/api/v1/auth/recover/validate", %{
+          "handle" => identity.handle,
+          "recovery_code" => code,
+          "otp_code" => totp_code(secret),
+          "current_email" => current_email
+        })
+
+      json_response(post_conn, 200)["recovery_token"]
+    end
+
+    test "applies password + email reset and issues new code", %{conn: conn} do
+      {identity, current_email} = register("rc_ok")
+      secret = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+      token = validate_and_get_token(conn, identity, current_email, code, secret)
+
+      uniq = :erlang.unique_integer([:positive])
+      new_email = "rc_ok_#{uniq}_new@test.com"
+
+      complete =
+        post(build_conn(), "/api/v1/auth/recover/complete", %{
+          "recovery_token" => token,
+          "new_email" => new_email,
+          "new_password" => "newpass1234567890xy",
+          "new_password_confirmation" => "newpass1234567890xy"
+        })
+
+      body = json_response(complete, 200)
+      assert body["status"] == "ok"
+      assert is_binary(body["new_recovery_code"])
+      refute body["new_recovery_code"] == code
+
+      user = Repo.get_by!(User, identity_id: identity.id)
+      assert user.email == new_email
+      assert user.confirmed_at != nil
+    end
+
+    test "rejects invalid token with 401", %{conn: conn} do
+      conn =
+        post(conn, "/api/v1/auth/recover/complete", %{
+          "recovery_token" => "not-a-valid-token",
+          "new_email" => "x@test.com",
+          "new_password" => "newpass1234567890xy",
+          "new_password_confirmation" => "newpass1234567890xy"
+        })
+
+      assert json_response(conn, 401)["error"] == "recovery.token_invalid"
+    end
+
+    test "rejects missing params with 400", %{conn: conn} do
+      conn = post(conn, "/api/v1/auth/recover/complete", %{"recovery_token" => "x"})
+      body = json_response(conn, 400)
+      assert body["error"] == "validation.failed"
+      assert "new_email" in body["required"]
+      assert "new_password" in body["required"]
+    end
+
+    test "invalid new email returns 422 with details", %{conn: conn} do
+      {identity, current_email} = register("rc_em")
+      secret = enable_2fa(identity)
+      {:ok, code, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
+      token = validate_and_get_token(conn, identity, current_email, code, secret)
+
+      complete =
+        post(build_conn(), "/api/v1/auth/recover/complete", %{
+          "recovery_token" => token,
+          "new_email" => "not-an-email",
+          "new_password" => "newpass1234567890xy",
+          "new_password_confirmation" => "newpass1234567890xy"
+        })
+
+      body = json_response(complete, 422)
+      assert body["error"] == "validation.failed"
+      assert body["details"] != nil
     end
   end
 
   describe "DELETE /api/v1/accounts/recovery_code" do
     test "clears the stored code when given current password", %{conn: conn} do
-      identity = register("api_clear")
+      {identity, _email} = register("api_clr")
+      enable_2fa(identity)
       {:ok, _, _} = Accounts.generate_recovery_code(identity.id, "password1234567890")
 
       conn =

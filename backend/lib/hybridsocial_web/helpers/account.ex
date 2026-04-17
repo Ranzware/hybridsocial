@@ -1,6 +1,13 @@
 defmodule HybridsocialWeb.Helpers.Account do
   @moduledoc """
-  Shared helper for building the `acct` field (user@domain for remote, handle for local).
+  Shared helpers for shaping Account JSON at the HTTP API boundary.
+
+  Keeps translation logic in one place — our internal atom for
+  business/brand/page accounts is `:organization` (matching the
+  ActivityPub Actor type we federate as), but the public HTTP API
+  and frontend call them "page". AP serialization continues to emit
+  the canonical `"Organization"`; only our own API surfaces use
+  `"page"`.
   """
 
   @doc """
@@ -30,5 +37,41 @@ defmodule HybridsocialWeb.Helpers.Account do
           "#{username}@#{domain}"
         end
     end
+  end
+
+  @doc """
+  Translates the internal identity type to its public API name.
+  `"organization"` becomes `"page"`; everything else passes through
+  unchanged. Accepts both strings and atoms.
+  """
+  def api_type(:organization), do: "page"
+  def api_type("organization"), do: "page"
+  def api_type(nil), do: nil
+  def api_type(type) when is_atom(type), do: Atom.to_string(type)
+  def api_type(type) when is_binary(type), do: type
+  def api_type(_), do: nil
+
+  @doc """
+  Minimal identity shape for embedding inside another resource's
+  JSON (message sender, notification actor, post author, etc.).
+  Always emits both `handle` (our internal, collision-safe string)
+  and `acct` (the display form: `user` for locals, `user@host` for
+  remotes). Frontend prefers `acct` when present.
+
+  Callers that render an identity in a list should use this instead
+  of spelling out the shape inline — that drift is what leaves
+  remote accounts showing their munged handle in one view and the
+  real webfinger form in another.
+  """
+  def serialize_summary(nil), do: nil
+
+  def serialize_summary(%Hybridsocial.Accounts.Identity{} = identity) do
+    %{
+      id: identity.id,
+      handle: identity.handle,
+      acct: build_acct(identity),
+      display_name: identity.display_name,
+      avatar_url: identity.avatar_url
+    }
   end
 end

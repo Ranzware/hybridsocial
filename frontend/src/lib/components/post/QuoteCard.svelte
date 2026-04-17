@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Post } from '$lib/api/types.js';
   import { relativeTime, fullDateTime } from '$lib/utils/time.js';
+  import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
 
   let {
     post,
@@ -38,6 +39,7 @@
   <div class="quote-header">
     <img src={post.account.avatar_url || '/images/default-avatar.svg'} alt="" class="quote-avatar" loading="lazy" />
     <span class="quote-name">{displayName}</span>
+    <AccountTypeIndicator account={post.account} size={12} />
     <span class="quote-handle">{handle}</span>
     <span class="quote-separator" aria-hidden="true">&middot;</span>
     <time class="quote-time" datetime={post.created_at} title={fullDate}>{timeAgo}</time>

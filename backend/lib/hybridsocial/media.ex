@@ -4,6 +4,7 @@ defmodule Hybridsocial.Media do
   """
   import Ecto.Query
 
+  alias Hybridsocial.Antivirus
   alias Hybridsocial.Repo
   alias Hybridsocial.Media.{MediaFile, Storage, Validator, Hash, Filter}
 
@@ -17,6 +18,7 @@ defmodule Hybridsocial.Media do
          {:ok, content_type} <- Validator.validate_content_type(binary_data),
          file_size <- byte_size(binary_data),
          :ok <- Validator.validate_file_size(file_size, content_type),
+         :ok <- Antivirus.scan(binary_data),
          :ok <- Hash.check_upload(path),
          :ok <- Validator.strip_metadata(path),
          {:ok, filtered} <-

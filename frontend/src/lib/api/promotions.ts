@@ -23,6 +23,7 @@ export interface Promotion {
 export interface PromotedUser {
   id: string;
   handle: string;
+  acct?: string;
   display_name: string;
   avatar_url: string | null;
   promoted: boolean;

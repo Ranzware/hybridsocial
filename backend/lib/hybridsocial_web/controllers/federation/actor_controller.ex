@@ -10,7 +10,12 @@ defmodule HybridsocialWeb.Federation.ActorController do
   alias Hybridsocial.Federation.ActorSerializer
   alias Hybridsocial.Federation.OutboxSerializer
 
+  # ActivityPub spec permits either of these two media types for
+  # actor + collection JSON. Some clients (notably Pleroma's older
+  # versions) request only `application/ld+json`, so we negotiate
+  # rather than hardcoding one.
   @ap_content_type "application/activity+json"
+  @ld_content_type ~s(application/ld+json; profile="https://www.w3.org/ns/activitystreams")
 
   def show(conn, %{"id" => id}) do
     case Accounts.get_identity(id) do
@@ -23,8 +28,22 @@ defmodule HybridsocialWeb.Federation.ActorController do
         actor = ActorSerializer.to_ap(identity)
 
         conn
-        |> put_resp_content_type(@ap_content_type)
+        |> put_resp_content_type(negotiated_content_type(conn))
         |> json(actor)
+    end
+  end
+
+  # Picks the content type to emit based on the Accept header. Falls
+  # back to `application/activity+json` (the more common AP type) when
+  # nothing matches or the client sent no Accept header.
+  defp negotiated_content_type(conn) do
+    accept_headers = Plug.Conn.get_req_header(conn, "accept")
+    accept = accept_headers |> List.first() |> to_string() |> String.downcase()
+
+    cond do
+      String.contains?(accept, "application/ld+json") -> @ld_content_type
+      String.contains?(accept, "application/activity+json") -> @ap_content_type
+      true -> @ap_content_type
     end
   end
 
@@ -56,7 +75,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
           end)
 
         collection = %{
-          "@context" => "https://www.w3.org/ns/activitystreams",
+          "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
           "id" => collection_url,
           "type" => "OrderedCollection",
           "totalItems" => length(follower_urls),
@@ -64,7 +83,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
         }
 
         conn
-        |> put_resp_content_type(@ap_content_type)
+        |> put_resp_content_type(negotiated_content_type(conn))
         |> json(collection)
     end
   end
@@ -97,7 +116,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
           end)
 
         collection = %{
-          "@context" => "https://www.w3.org/ns/activitystreams",
+          "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
           "id" => collection_url,
           "type" => "OrderedCollection",
           "totalItems" => length(following_urls),
@@ -105,7 +124,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
         }
 
         conn
-        |> put_resp_content_type(@ap_content_type)
+        |> put_resp_content_type(negotiated_content_type(conn))
         |> json(collection)
     end
   end
@@ -113,9 +132,13 @@ defmodule HybridsocialWeb.Federation.ActorController do
   def featured(conn, %{"id" => id}) do
     base_url = HybridsocialWeb.Endpoint.url()
 
-    # Get pinned posts for this actor
+    # Use the schema (not a raw "posts" string source) so Ecto casts
+    # the string-form UUID to binary for us. The raw-source query
+    # crashed with `Postgrex expected a binary of 16 bytes` when
+    # called via the federation route — Mastodon hits this endpoint
+    # on every actor lookup.
     pinned =
-      from(p in "posts",
+      from(p in Hybridsocial.Social.Post,
         where: p.identity_id == ^id and p.is_pinned == true and is_nil(p.deleted_at),
         select: p.id,
         order_by: [desc: p.inserted_at]
@@ -127,7 +150,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
     conn
     |> put_resp_content_type(@ap_content_type)
     |> json(%{
-      "@context" => "https://www.w3.org/ns/activitystreams",
+      "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
       "id" => "#{base_url}/actors/#{id}/collections/featured",
       "type" => "OrderedCollection",
       "totalItems" => length(items),
@@ -153,7 +176,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
         collection = OutboxSerializer.serialize_outbox(identity, page)
 
         conn
-        |> put_resp_content_type(@ap_content_type)
+        |> put_resp_content_type(negotiated_content_type(conn))
         |> json(collection)
     end
   end

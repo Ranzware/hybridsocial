@@ -75,6 +75,64 @@ defmodule HybridsocialWeb.Api.V1.StatusControllerTest do
     end
   end
 
+  describe "POST /api/v1/statuses/by_ids" do
+    setup :setup_user
+
+    test "returns posts matching the given IDs", %{conn: conn, identity: identity} do
+      {:ok, a} = Posts.create_post(identity.id, %{"content" => "A"})
+      {:ok, b} = Posts.create_post(identity.id, %{"content" => "B"})
+      {:ok, _unwanted} = Posts.create_post(identity.id, %{"content" => "not requested"})
+
+      conn = post(conn, "/api/v1/statuses/by_ids", %{"ids" => [a.id, b.id]})
+      response = json_response(conn, 200)
+
+      assert is_list(response)
+      assert length(response) == 2
+      ids = Enum.map(response, & &1["id"])
+      assert a.id in ids
+      assert b.id in ids
+    end
+
+    test "silently skips unknown IDs", %{conn: conn, identity: identity} do
+      {:ok, real} = Posts.create_post(identity.id, %{"content" => "real"})
+      fake_id = Ecto.UUID.generate()
+
+      conn = post(conn, "/api/v1/statuses/by_ids", %{"ids" => [real.id, fake_id]})
+      response = json_response(conn, 200)
+
+      assert length(response) == 1
+      assert hd(response)["id"] == real.id
+    end
+
+    test "returns [] for an empty list", %{conn: conn} do
+      conn = post(conn, "/api/v1/statuses/by_ids", %{"ids" => []})
+      assert json_response(conn, 200) == []
+    end
+
+    test "returns [] when ids key is missing or malformed", %{conn: conn} do
+      conn = post(conn, "/api/v1/statuses/by_ids", %{})
+      assert json_response(conn, 200) == []
+
+      conn2 = post(build_conn(), "/api/v1/statuses/by_ids", %{"ids" => "not-a-list"})
+      assert json_response(conn2, 200) == []
+    end
+
+    test "caps response at 100 posts per request", %{conn: conn, identity: identity} do
+      # Intersperse 101 real post IDs to ensure the cap applies regardless
+      # of whether the client repeats or pads — we just need to prove the
+      # endpoint doesn't blow up on a long list.
+      ids =
+        Enum.map(1..101, fn i ->
+          {:ok, p} = Posts.create_post(identity.id, %{"content" => "post #{i}"})
+          p.id
+        end)
+
+      conn = post(conn, "/api/v1/statuses/by_ids", %{"ids" => ids})
+      response = json_response(conn, 200)
+      assert length(response) <= 100
+    end
+  end
+
   describe "PUT /api/v1/statuses/:id" do
     setup :setup_user
 

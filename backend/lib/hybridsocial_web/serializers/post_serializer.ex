@@ -231,6 +231,7 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
 
     %{
       id: identity.id,
+      type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
       handle: identity.handle,
       acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
       display_name: identity.display_name,
@@ -419,12 +420,23 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
   end
 
   defp serialize_media_attachment(%MediaFile{} = media) do
+    # Remote attachments live on the author's instance. We rewrite
+    # the URL through our media proxy so the client never reveals
+    # its IP / UA to the remote host. Local uploads keep their
+    # direct media_url.
+    {url, remote_url} =
+      if is_binary(media.remote_url) do
+        {Hybridsocial.Media.MediaProxy.url(media.remote_url), media.remote_url}
+      else
+        {Hybridsocial.Media.media_url(media), nil}
+      end
+
     %{
       id: media.id,
       type: media_type_for(media.content_type),
-      url: Hybridsocial.Media.media_url(media),
-      preview_url: thumbnail_url(media),
-      remote_url: nil,
+      url: url,
+      preview_url: thumbnail_url(media) || url,
+      remote_url: remote_url,
       description: media.alt_text,
       blurhash: media.blurhash,
       meta: %{

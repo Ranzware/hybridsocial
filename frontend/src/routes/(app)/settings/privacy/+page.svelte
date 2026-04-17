@@ -7,6 +7,10 @@
   import { preferencesStore, updatePreferences } from '$lib/stores/preferences.js';
   import Toggle from '$lib/components/ui/Toggle.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
+  import {
+    isAutoLoadRemoteMedia,
+    setAutoLoadRemoteMedia,
+  } from '$lib/utils/media-preferences.js';
 
   let isLocked: boolean = $state(false);
   let discoverable: boolean = $state(true);
@@ -15,9 +19,17 @@
   let groupDmOptIn: boolean = $state(false);
   let loaded = $state(false);
   let defaultVisibility = $state<string>('public');
+  let autoLoadRemoteMedia = $state(true);
   let saving = $state(false);
   let saved = $state(false);
   let error: string | null = $state(null);
+
+  // Media preference is local-only — flushes to localStorage on
+  // every change, takes effect immediately on every visible
+  // <LazyMedia> via the autoLoadRemoteMedia store.
+  $effect(() => {
+    if (loaded) setAutoLoadRemoteMedia(autoLoadRemoteMedia);
+  });
 
   onMount(async () => {
     const state = get(authStore);
@@ -30,6 +42,9 @@
     // Load default visibility from local preferences
     const prefs = get(preferencesStore);
     defaultVisibility = prefs.default_visibility || 'public';
+
+    // Media auto-load preference (localStorage)
+    autoLoadRemoteMedia = isAutoLoadRemoteMedia();
 
     try {
       const dmPrefs = await api.get<any>('/api/v1/dm_preferences');
@@ -149,6 +164,22 @@
         <span class="setting-description">Let others add you to group conversations</span>
       </div>
       <Toggle bind:checked={groupDmOptIn} name="group-dm" />
+    </div>
+
+    <div class="setting-divider"></div>
+
+    <div class="setting-row">
+      <div class="setting-info">
+        <span class="setting-label">Auto-load remote media</span>
+        <span class="setting-description">
+          When on, images and videos from other instances load
+          automatically as you scroll. Turn off to save data on
+          metered connections — remote media stays as a tap-to-load
+          placeholder until you ask for it. Posts from this instance
+          always auto-load.
+        </span>
+      </div>
+      <Toggle bind:checked={autoLoadRemoteMedia} name="auto-load-remote-media" />
     </div>
 
     <div class="setting-divider"></div>

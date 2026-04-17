@@ -5,7 +5,7 @@ defmodule Hybridsocial.Social.Post do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @valid_visibilities ~w(public followers group direct list)
+  @valid_visibilities ~w(public unlisted followers group direct list)
   @valid_post_types ~w(text media video_stream poll article)
 
   schema "posts" do
@@ -44,6 +44,7 @@ defmodule Hybridsocial.Social.Post do
     has_many :boosts, Hybridsocial.Social.Boost
     has_many :revisions, Hybridsocial.Social.PostRevision
     has_many :media_attachments, Hybridsocial.Media.MediaFile
+    has_many :mentions, Hybridsocial.Social.PostMention
     has_one :poll, Hybridsocial.Social.Poll
 
     timestamps(type: :utc_datetime_usec)
@@ -54,6 +55,7 @@ defmodule Hybridsocial.Social.Post do
 
     post
     |> cast(attrs, [
+      :id,
       :content,
       :post_type,
       :visibility,
@@ -102,6 +104,17 @@ defmodule Hybridsocial.Social.Post do
   def soft_delete_changeset(post) do
     post
     |> change(deleted_at: DateTime.utc_now() |> DateTime.truncate(:microsecond))
+  end
+
+  @doc """
+  Flips a scheduled post to "published now". Kept separate from the
+  generic changeset so the scheduler's call site is explicit about
+  what it's doing + lets `Posts.run_post_published_hooks/1` pattern
+  match on the result.
+  """
+  def publish_changeset(post, published_at) do
+    post
+    |> change(published_at: published_at)
   end
 
   defp validate_content_for_type(changeset) do

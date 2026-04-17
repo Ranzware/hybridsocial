@@ -137,7 +137,7 @@ defmodule Hybridsocial.Search.Indexer do
       handle: identity.handle,
       display_name: identity.display_name,
       bio: identity.bio,
-      type: identity.type,
+      type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
       is_bot: identity.is_bot || false
     }
 
@@ -264,7 +264,7 @@ defmodule Hybridsocial.Search.Indexer do
             handle: identity.handle,
             display_name: identity.display_name,
             bio: identity.bio,
-            type: identity.type,
+            type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
             is_bot: identity.is_bot || false
           }
         end)

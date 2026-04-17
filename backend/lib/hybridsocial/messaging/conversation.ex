@@ -17,6 +17,9 @@ defmodule Hybridsocial.Messaging.Conversation do
     has_many :participants, Hybridsocial.Messaging.Participant
     has_many :messages, Hybridsocial.Messaging.Message
 
+    field :last_message, :map, virtual: true
+    field :unread_count, :integer, virtual: true, default: 0
+
     timestamps(type: :utc_datetime_usec)
   end
 

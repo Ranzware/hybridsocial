@@ -3,6 +3,7 @@
   import { authStore } from '$lib/stores/auth.js';
   import { get } from 'svelte/store';
   import type { Identity } from '$lib/api/types.js';
+  import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
 
   let {
     handle,
@@ -119,6 +120,7 @@
           <div class="hc-info">
             <div class="hc-name-row">
               <div class="hc-name">{account.display_name || account.handle}</div>
+              <AccountTypeIndicator account={account} />
               {#if !isOwnAccount}
                 <div class="hc-actions">
                   <button

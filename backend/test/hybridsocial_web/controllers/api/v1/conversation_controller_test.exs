@@ -369,4 +369,56 @@ defmodule HybridsocialWeb.Api.V1.ConversationControllerTest do
       assert response["allow_group_dms"] == true
     end
   end
+
+  describe "DELETE /api/v1/conversations/:id" do
+    test "removes the conversation from caller's inbox without affecting the other party",
+         %{conn: conn} do
+      alice = create_user("dc_alice", "dc_alice@example.com")
+      bob = create_user("dc_bob", "dc_bob@example.com")
+
+      {:ok, conversation} = Messaging.find_or_create_direct(alice.id, bob.id)
+      {:ok, _msg} = Messaging.send_message(conversation.id, alice.id, %{"content" => "hi"})
+
+      # Alice deletes the conversation.
+      conn1 =
+        conn
+        |> authenticate(alice)
+        |> delete("/api/v1/conversations/#{conversation.id}")
+
+      assert json_response(conn1, 200)["message"] == "conversation.deleted"
+
+      # Alice's inbox no longer shows it.
+      conn2 =
+        build_conn()
+        |> authenticate(alice)
+        |> get("/api/v1/conversations")
+
+      assert json_response(conn2, 200) == []
+
+      # Bob still sees it.
+      conn3 =
+        build_conn()
+        |> authenticate(bob)
+        |> get("/api/v1/conversations")
+
+      response = json_response(conn3, 200)
+      assert length(response) == 1
+      assert hd(response)["id"] == conversation.id
+    end
+
+    test "returns 404 when caller is not a participant", %{conn: conn} do
+      alice = create_user("dc2_alice", "dc2_alice@example.com")
+      bob = create_user("dc2_bob", "dc2_bob@example.com")
+      eve = create_user("dc2_eve", "dc2_eve@example.com")
+
+      {:ok, conversation} = Messaging.find_or_create_direct(alice.id, bob.id)
+
+      conn =
+        conn
+        |> authenticate(eve)
+        |> delete("/api/v1/conversations/#{conversation.id}")
+
+      assert json_response(conn, 404)["error"] == "conversation.not_found"
+    end
+  end
 end

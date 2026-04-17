@@ -29,12 +29,23 @@
         return 'boosted your post';
       case 'mention':
         return 'mentioned you';
+      case 'reply':
+        return 'replied to your post';
+      case 'quote':
+        return 'quoted your post';
       case 'poll':
+      case 'poll_ended':
         return 'A poll you voted in has ended';
       case 'update':
         return 'edited a post';
       case 'group_invite':
         return 'invited you to a group';
+      case 'group_application':
+        return 'applied to join your group';
+      case 'report':
+        return 'filed a report';
+      case 'admin':
+        return 'admin action';
       default:
         return 'interacted with you';
     }
@@ -53,7 +64,12 @@
         return 'M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3';
       case 'mention':
         return 'M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z';
+      case 'reply':
+        return 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z';
+      case 'quote':
+        return 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 11l-3 3-2-2M9 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z';
       case 'poll':
+      case 'poll_ended':
         return 'M18 20V10M12 20V4M6 20v-6';
       default:
         return 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0';
@@ -72,6 +88,8 @@
       case 'boost':
         return 'var(--color-success)';
       case 'mention':
+      case 'reply':
+      case 'quote':
         return 'var(--color-primary)';
       default:
         return 'var(--color-text-secondary)';
@@ -91,10 +109,15 @@
       case 'boost':
       case 'favourite':
       case 'mention':
+      case 'reply':
+      case 'quote':
       case 'update':
       case 'poll':
+      case 'poll_ended':
         if (notification.post) {
           goto(`/post/${notification.post.id}`);
+        } else if (notification.target_id && notification.target_type === 'post') {
+          goto(`/post/${notification.target_id}`);
         }
         break;
       case 'group_invite':

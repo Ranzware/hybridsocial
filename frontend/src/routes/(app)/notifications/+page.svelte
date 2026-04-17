@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import type { Notification } from '$lib/api/types.js';
   import { getNotifications, markAllNotificationsRead } from '$lib/api/notifications.js';
-  import { setNotifications, markRead } from '$lib/stores/notifications.js';
+  import { setNotifications, markRead, markAllLocal } from '$lib/stores/notifications.js';
   import { markNotificationRead } from '$lib/api/notifications.js';
   import NotificationItem from '$lib/components/notification/NotificationItem.svelte';
   import Tabs from '$lib/components/ui/Tabs.svelte';
@@ -19,6 +19,7 @@
   const tabs = [
     { id: 'all', label: 'All' },
     { id: 'mention', label: 'Mentions' },
+    { id: 'reply', label: 'Replies' },
     { id: 'follow', label: 'Follows' },
     { id: 'reaction', label: 'Reactions' },
   ];
@@ -27,9 +28,13 @@
     switch (activeTab) {
       case 'mention':
         return ['mention'];
+      case 'reply':
+        return ['reply', 'quote'];
       case 'follow':
         return ['follow', 'follow_request'];
       case 'reaction':
+        // "Reactions" in the UI bucket covers every positive
+        // engagement on your post that isn't a reply/mention.
         return ['favourite', 'reaction', 'boost'];
       default:
         return undefined;
@@ -79,6 +84,29 @@
     }
   }
 
+  // Entering the notifications page is the user's "I saw it" signal
+  // — clear the badge immediately so the counter in the sidebar /
+  // topbar is current without requiring an explicit "mark all read"
+  // click. Individual items stay visually "unread" (primary-soft
+  // background) until the user clicks them so they can still spot
+  // new arrivals; the server-side unread flag flips so the bell
+  // doesn't re-light on refresh.
+  async function clearOnEntry() {
+    // Optimistically flatten the unread count so the bell badge
+    // drops to 0 immediately — the server request below catches
+    // up asynchronously.
+    markAllLocal();
+    try {
+      await markAllNotificationsRead();
+    } catch {
+      /* If the server call fails the local state is already set;
+         next page load will re-sync from the DB. */
+    } finally {
+      items = items.map((n) => ({ ...n, read: true }));
+      setNotifications(items);
+    }
+  }
+
   async function handleNotificationClick(notification: Notification) {
     if (!notification.read) {
       try {
@@ -96,8 +124,11 @@
     }
   }
 
-  onMount(() => {
-    loadNotifications(true);
+  onMount(async () => {
+    await loadNotifications(true);
+    // Fire the badge clear after the list is visible so the
+    // pre-existing unread styling flashes once, then settles.
+    clearOnEntry();
   });
 
   // Reload when tab changes (not on initial mount)
@@ -187,6 +218,7 @@
   .notifications-list {
     display: flex;
     flex-direction: column;
+    gap: var(--space-2);
   }
 
   .notifications-empty {

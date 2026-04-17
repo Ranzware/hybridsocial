@@ -972,26 +972,44 @@ defmodule Hybridsocial.Accounts do
   """
   def generate_recovery_code(identity_id, password)
       when is_binary(identity_id) and is_binary(password) do
-    with user when not is_nil(user) <- Repo.get_by(User, identity_id: identity_id),
-         true <- Bcrypt.verify_pass(password, user.password_hash),
-         identity when not is_nil(identity) <- get_identity(identity_id) do
-      code = RecoveryCode.generate()
-      hash = RecoveryCode.hash(code)
-      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    user = Repo.get_by(User, identity_id: identity_id)
 
-      case identity
-           |> Ecto.Changeset.change(%{
-             recovery_code_hash: hash,
-             recovery_code_generated_at: now,
-             recovery_code_last_used_at: nil
-           })
-           |> Repo.update() do
-        {:ok, updated} -> {:ok, code, updated}
-        other -> other
-      end
-    else
-      nil -> {:error, :not_found}
-      false -> {:error, :invalid_password}
+    cond do
+      is_nil(user) ->
+        Bcrypt.no_user_verify()
+        {:error, :not_found}
+
+      not Bcrypt.verify_pass(password, user.password_hash) ->
+        {:error, :invalid_password}
+
+      user.otp_enabled != true ->
+        {:error, :two_factor_required}
+
+      true ->
+        do_generate_recovery_code(identity_id)
+    end
+  end
+
+  defp do_generate_recovery_code(identity_id) do
+    case get_identity(identity_id) do
+      nil ->
+        {:error, :not_found}
+
+      identity ->
+        code = RecoveryCode.generate()
+        hash = RecoveryCode.hash(code)
+        now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+        case identity
+             |> Ecto.Changeset.change(%{
+               recovery_code_hash: hash,
+               recovery_code_generated_at: now,
+               recovery_code_last_used_at: nil
+             })
+             |> Repo.update() do
+          {:ok, updated} -> {:ok, code, updated}
+          other -> other
+        end
     end
   end
 
@@ -1016,63 +1034,132 @@ defmodule Hybridsocial.Accounts do
   end
 
   @doc """
-  Recover an account: handle + recovery code + new password.
+  Step 1 of account recovery: validate matching factors + anti-abuse.
 
-  On success: resets the password, revokes all sessions, stamps
-  `recovered_at` (gates sensitive actions for 24h), auto-rotates the
-  recovery code, and returns `{:ok, new_code, identity}` — the caller
-  shows the new code to the user once.
+  Matching factors (ALL must match): handle, recovery code, current
+  TOTP code, current email. Also runs PoW and CAPTCHA gates when
+  enabled in instance config.
 
-  Returns `{:error, :invalid_credentials}` for any mismatch (wrong
-  handle, missing code, wrong code). Never leaks which one was wrong.
+  Returns `{:ok, identity}` when everything matches. The caller
+  should then issue a short-lived signed token that allows step 2.
+
+  Returns:
+    * `{:error, :pow_required}` — PoW missing or invalid
+    * `{:error, :captcha_failed}` / `{:error, :captcha_service_unavailable}` /
+      `{:error, :captcha_parse_error}` / `{:error, :missing_token}` — captcha
+    * `{:error, :invalid_credentials}` — any of the four factors didn't match
   """
-  def recover_account(handle, code, new_password, password_confirmation)
-      when is_binary(handle) and is_binary(code) and is_binary(new_password) do
-    # Normalise input so verify_pass times consistently regardless of
-    # whether the identity exists.
+  def validate_recovery_factors(params) when is_map(params) do
+    handle = Map.get(params, "handle") || Map.get(params, :handle)
+    code = Map.get(params, "recovery_code") || Map.get(params, :recovery_code)
+    otp = Map.get(params, "otp_code") || Map.get(params, :otp_code)
+    current_email = Map.get(params, "current_email") || Map.get(params, :current_email)
+
+    required = [handle, code, otp, current_email]
+
+    with false <- Enum.any?(required, &(not is_binary(&1))),
+         :ok <- check_pow(params),
+         :ok <- check_turnstile(params),
+         {:ok, identity} <- match_recovery_factors(handle, code, otp, current_email) do
+      {:ok, identity}
+    else
+      true -> {:error, :invalid_credentials}
+      {:error, _} = err -> err
+    end
+  end
+
+  defp match_recovery_factors(handle, code, otp, current_email) do
     identity = get_identity_by_handle(handle)
     user = identity && Repo.get_by(User, identity_id: identity.id)
 
-    valid? =
+    code_ok? =
       case identity do
         %Identity{recovery_code_hash: hash} when is_binary(hash) ->
           RecoveryCode.verify(code, hash)
 
         _ ->
-          # Still run the bcrypt dance to equalise timing.
           RecoveryCode.verify(code, nil)
           false
       end
 
+    otp_ok? =
+      case user do
+        %User{otp_enabled: true, otp_secret: encoded} when is_binary(encoded) ->
+          case Base.decode32(encoded, padding: false) do
+            {:ok, secret} -> Hybridsocial.Auth.TOTP.valid_code?(secret, otp)
+            :error -> false
+          end
+
+        _ ->
+          false
+      end
+
+    email_ok? =
+      case user do
+        %User{email: stored} when is_binary(stored) ->
+          String.downcase(String.trim(current_email)) == String.downcase(stored)
+
+        _ ->
+          false
+      end
+
     cond do
-      not valid? ->
-        {:error, :invalid_credentials}
-
-      is_nil(user) ->
-        {:error, :invalid_credentials}
-
-      true ->
-        do_recover_account(identity, user, new_password, password_confirmation)
+      not code_ok? -> {:error, :invalid_credentials}
+      is_nil(user) -> {:error, :invalid_credentials}
+      not otp_ok? -> {:error, :invalid_credentials}
+      not email_ok? -> {:error, :invalid_credentials}
+      true -> {:ok, identity}
     end
   end
 
-  defp do_recover_account(identity, user, new_password, password_confirmation) do
+  @doc """
+  Step 2 of account recovery: apply the reset.
+
+  Requires an identity previously validated via
+  `validate_recovery_factors/1`. Resets password AND email, marks the
+  account confirmed, revokes all sessions, stamps `recovered_at`
+  (gates sensitive actions for 24h), auto-rotates the recovery code,
+  and returns `{:ok, new_code, identity}`.
+
+  Returns `{:error, :not_found}` if the identity or its user row no
+  longer exists. Returns `{:error, :invalid_input, changeset}` when
+  the new email/password fails validation.
+  """
+  def complete_recovery(identity_id, new_email, new_pw, new_pw_conf)
+      when is_binary(identity_id) and is_binary(new_email) and is_binary(new_pw) and
+             is_binary(new_pw_conf) do
+    with identity when not is_nil(identity) <- get_identity(identity_id),
+         user when not is_nil(user) <- Repo.get_by(User, identity_id: identity_id) do
+      finalize_recovery(identity, user, new_email, new_pw, new_pw_conf)
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp finalize_recovery(identity, user, new_email, new_pw, new_pw_conf) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
     new_code = RecoveryCode.generate()
     new_hash = RecoveryCode.hash(new_code)
 
     Repo.transaction(fn ->
-      # 1. Reset password.
+      # 1. Reset password, email, and mark account confirmed.
       case user
            |> User.password_changeset(%{
-             "password" => new_password,
-             "password_confirmation" => password_confirmation
+             "password" => new_pw,
+             "password_confirmation" => new_pw_conf
            })
+           |> Ecto.Changeset.cast(%{email: new_email}, [:email])
+           |> Ecto.Changeset.validate_required([:email])
+           |> Ecto.Changeset.validate_length(:email, max: 254)
+           |> Ecto.Changeset.validate_format(:email, ~r/^[^\s]+@[^\s]+\.[^\s]+$/)
+           |> Ecto.Changeset.update_change(:email, &String.downcase/1)
+           |> Ecto.Changeset.unique_constraint(:email)
+           |> Ecto.Changeset.put_change(:confirmed_at, now)
            |> Ecto.Changeset.put_change(:reset_token, nil)
            |> Ecto.Changeset.put_change(:reset_token_at, nil)
            |> Repo.update() do
         {:ok, _user} -> :ok
-        {:error, cs} -> Repo.rollback({:invalid_password, cs})
+        {:error, cs} -> Repo.rollback({:invalid_input, cs})
       end
 
       # 2. Rotate recovery code + stamp recovered_at.
@@ -1092,7 +1179,7 @@ defmodule Hybridsocial.Accounts do
     end)
     |> case do
       {:ok, code} -> {:ok, code, Repo.get!(Identity, identity.id)}
-      {:error, {:invalid_password, cs}} -> {:error, :invalid_password, cs}
+      {:error, {:invalid_input, cs}} -> {:error, :invalid_input, cs}
       error -> error
     end
   end

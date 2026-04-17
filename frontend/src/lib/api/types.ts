@@ -17,9 +17,20 @@ export interface TierLimits {
   follows_limit: number;
 }
 
+/**
+ * User-facing handle helper. Prefers the `acct` field emitted by
+ * the backend's identity serializer — that's already in webfinger
+ * form (`user@domain` for remote, bare `user` for local). Falls
+ * back to `handle` for older payloads that don't ship `acct` yet
+ * so no call site needs to guard for undefined.
+ */
+export function displayAcct(identity: { handle?: string; acct?: string | null }): string {
+  return identity.acct || identity.handle || '';
+}
+
 export interface Identity {
   id: string;
-  type: 'user' | 'organization' | 'bot' | 'group';
+  type: 'user' | 'bot' | 'group' | 'page';
   handle: string;
   acct?: string;
   url?: string;
@@ -173,11 +184,30 @@ export interface MediaAttachment {
 
 export interface Notification {
   id: string;
-  type: 'mention' | 'boost' | 'favourite' | 'reaction' | 'follow' | 'follow_request' | 'poll' | 'update' | 'group_invite';
+  type:
+    | 'mention'
+    | 'reply'
+    | 'quote'
+    | 'boost'
+    | 'favourite'
+    | 'reaction'
+    | 'follow'
+    | 'follow_request'
+    | 'poll'
+    | 'poll_ended'
+    | 'update'
+    | 'group_invite'
+    | 'group_application'
+    | 'report'
+    | 'admin';
   created_at: string;
   read: boolean;
   account: Identity;
   post: Post | null;
+  // Set for post-related notification types when the post object isn't
+  // eagerly joined — UI can follow target_id + target_type to link.
+  target_id?: string | null;
+  target_type?: 'post' | 'group' | null;
 }
 
 export interface Conversation {

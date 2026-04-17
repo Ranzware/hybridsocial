@@ -1,0 +1,253 @@
+# Federation interop testbed.
+#
+# Runs HybridSocial on `arab.place` + a fresh Mastodon instance on
+# `mastodon.arab.place`, both fronted by a single Caddy with TLS via
+# Let's Encrypt. The two instances live in the same Docker network
+# so they can reach each other directly when going through Caddy
+# at the public domains.
+#
+# DEPLOYMENT (after pointing both DNS records at the server):
+#   1. cp .env.federation-test.example .env
+#   2. sh ../docker/generate-secrets.sh .env
+#   3. sh scripts/generate-mastodon-secrets.sh .env
+#   4. docker compose -f docker-compose.federation-test.yml up -d
+#   5. sh scripts/mastodon-first-time-setup.sh   # creates DB + admin
+#   6. sh scripts/federation-interop-test.sh
+#
+# Tear down:
+#   docker compose -f docker-compose.federation-test.yml down -v
+
+services:
+  # =========================================================================
+  # HybridSocial stack — same as docker-compose-production.yml but
+  # references shared Caddy + slimmer for testbed (no opensearch needed).
+  # =========================================================================
+
+  hs_postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${HS_DB_USER:-hybridsocial}
+      POSTGRES_PASSWORD: ${HS_DB_PASSWORD:?Set HS_DB_PASSWORD in .env}
+      POSTGRES_DB: ${HS_DB_NAME:-hybridsocial_prod}
+    volumes:
+      - hs_pgdata:/var/lib/postgresql/data
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HS_DB_USER:-hybridsocial}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hs_valkey:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command: ["valkey-server", "--appendonly", "yes"]
+    volumes:
+      - hs_valkeydata:/data
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  hs_nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    command: ["--jetstream", "--store_dir=/data", "--http_port=8222"]
+    volumes:
+      - hs_natsdata:/data
+    networks:
+      - federation
+
+  hs_backend_migrate:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: "ecto://${HS_DB_USER:-hybridsocial}:${HS_DB_PASSWORD}@hs_postgres/${HS_DB_NAME:-hybridsocial_prod}"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?}
+      VALKEY_URL: "redis://hs_valkey:6379"
+      NATS_URL: "nats://hs_nats:4222"
+    command: ["eval", "Hybridsocial.Release.migrate()"]
+    depends_on:
+      hs_postgres:
+        condition: service_healthy
+    networks:
+      - federation
+    restart: "no"
+
+  hs_backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      hs_backend_migrate:
+        condition: service_completed_successfully
+    environment:
+      PHX_SERVER: "true"
+      PORT: "4000"
+      LOG_LEVEL: ${HS_LOG_LEVEL:-info}
+      DATABASE_URL: "ecto://${HS_DB_USER:-hybridsocial}:${HS_DB_PASSWORD}@hs_postgres/${HS_DB_NAME:-hybridsocial_prod}"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?}
+      PHX_HOST: arab.place
+      MEDIA_HOST: https://media.arab.place
+      VALKEY_URL: "redis://hs_valkey:6379"
+      NATS_URL: "nats://hs_nats:4222"
+      INSTANCE_PUBLIC_KEY: ${INSTANCE_PUBLIC_KEY:-}
+      INSTANCE_PRIVATE_KEY: ${INSTANCE_PRIVATE_KEY:-}
+      # DM at-rest encryption master key. Messaging.Crypto refuses
+      # to encrypt without it and crashes the send-message path.
+      # Read at runtime from MESSAGE_ENCRYPTION_KEY.
+      MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:-}
+    volumes:
+      - hs_uploads:/app/uploads
+    networks:
+      - federation
+
+  hs_frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      ORIGIN: "https://arab.place"
+      PROTOCOL_HEADER: "x-forwarded-proto"
+      HOST_HEADER: "x-forwarded-host"
+    depends_on:
+      - hs_backend
+    networks:
+      - federation
+
+  # =========================================================================
+  # Mastodon stack — official 4.x images. Three processes share an
+  # image: web (puma), streaming (node), sidekiq (workers).
+  # =========================================================================
+
+  mastodon_db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mastodon
+      POSTGRES_PASSWORD: ${MASTODON_DB_PASSWORD:?Set MASTODON_DB_PASSWORD in .env}
+      POSTGRES_DB: mastodon_production
+    volumes:
+      - mastodon_pgdata:/var/lib/postgresql/data
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mastodon"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mastodon_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - mastodon_redisdata:/data
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mastodon_web:
+    image: ghcr.io/mastodon/mastodon:v4.3
+    restart: unless-stopped
+    env_file: ./mastodon/.env.production
+    command: bundle exec puma -C config/puma.rb
+    depends_on:
+      mastodon_db:
+        condition: service_healthy
+      mastodon_redis:
+        condition: service_healthy
+    volumes:
+      - mastodon_public_system:/mastodon/public/system
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --proxy=off localhost:3000/health || exit 1"]
+      interval: 10s
+      retries: 12
+      timeout: 5s
+
+  mastodon_streaming:
+    image: ghcr.io/mastodon/mastodon-streaming:v4.3
+    restart: unless-stopped
+    env_file: ./mastodon/.env.production
+    command: node ./streaming
+    depends_on:
+      mastodon_db:
+        condition: service_healthy
+      mastodon_redis:
+        condition: service_healthy
+    networks:
+      - federation
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider --proxy=off localhost:4000/api/v1/streaming/health || exit 1"]
+      interval: 10s
+      retries: 12
+
+  mastodon_sidekiq:
+    image: ghcr.io/mastodon/mastodon:v4.3
+    restart: unless-stopped
+    env_file: ./mastodon/.env.production
+    command: bundle exec sidekiq
+    depends_on:
+      mastodon_web:
+        condition: service_healthy
+    volumes:
+      - mastodon_public_system:/mastodon/public/system
+    networks:
+      - federation
+
+  # =========================================================================
+  # Caddy fronts both domains. CrowdSec / Coraza intentionally LEFT OUT
+  # of the testbed (those are interop-irrelevant; they'd just add noise
+  # to debugging actual federation issues). Production uses the full
+  # stack via docker-compose-production.yml.
+  # =========================================================================
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL for Let's Encrypt registration}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - hs_backend
+      - hs_frontend
+      - mastodon_web
+      - mastodon_streaming
+    networks:
+      - federation
+
+volumes:
+  hs_pgdata:
+  hs_valkeydata:
+  hs_natsdata:
+  hs_uploads:
+  mastodon_pgdata:
+  mastodon_redisdata:
+  mastodon_public_system:
+  caddy_data:
+  caddy_config:
+
+networks:
+  federation:
+    driver: bridge

@@ -3,13 +3,26 @@
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
   import type { Conversation, Message } from '$lib/api/types.js';
-  import { getConversation, getMessages, sendMessage, markConversationRead } from '$lib/api/conversations.js';
+  import {
+    getConversation,
+    getMessages,
+    sendMessage,
+    markConversationRead,
+    deleteConversation,
+    deleteMessage as apiDeleteMessage,
+    addMessageReaction,
+    editMessage as apiEditMessage,
+  } from '$lib/api/conversations.js';
+  import { markConversationReadLocal } from '$lib/stores/dm-unread.js';
   import { currentUser } from '$lib/stores/auth.js';
   import MessageBubble from '$lib/components/dm/MessageBubble.svelte';
   import MessageInput from '$lib/components/dm/MessageInput.svelte';
   import TypingIndicator from '$lib/components/dm/TypingIndicator.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
-  import Avatar from '$lib/components/ui/Avatar.svelte';
+  import ParticipantStrip from '$lib/components/dm/ParticipantStrip.svelte';
+  import { addToast } from '$lib/stores/toast.js';
+  import { slide } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
 
   let conversation = $state<Conversation | null>(null);
   let messages = $state<Message[]>([]);
@@ -38,24 +51,80 @@
 
   let avatarUser = $derived(otherParticipants[0] ?? null);
 
-  onMount(async () => {
-    try {
-      const [conv, msgResult] = await Promise.all([
-        getConversation(conversationId),
-        getMessages(conversationId)
-      ]);
-      conversation = conv;
-      messages = msgResult.data.reverse();
-      cursor = msgResult.next_cursor;
-      hasMore = !!msgResult.next_cursor;
-      await markConversationRead(conversationId);
-      scrollToBottom();
-    } catch {
-      // Error loading conversation
-    } finally {
-      loading = false;
-    }
+  onMount(() => {
+    void (async () => {
+      try {
+        const [conv, msgResult] = await Promise.all([
+          getConversation(conversationId),
+          getMessages(conversationId)
+        ]);
+        conversation = conv;
+        messages = msgResult.data.reverse();
+        cursor = msgResult.next_cursor;
+        hasMore = !!msgResult.next_cursor;
+        // Clear the DM badge optimistically — the server-side
+        // markConversationRead call below will fire `chat.read`
+        // which also clears, but doing it here avoids a one-event
+        // delay before the badge drops.
+        markConversationReadLocal(conversationId);
+        await markConversationRead(conversationId);
+        scrollToBottom();
+      } catch {
+        // Error loading conversation
+      } finally {
+        loading = false;
+      }
+    })();
+
+    window.addEventListener('chat-event', handleChatEvent as EventListener);
+    return () => {
+      window.removeEventListener('chat-event', handleChatEvent as EventListener);
+    };
   });
+
+  function handleChatEvent(ev: Event) {
+    const detail = (ev as CustomEvent<{ type: string; data: Record<string, unknown> }>).detail;
+    if (!detail) return;
+
+    const data = detail.data;
+    if (data?.conversation_id !== conversationId) return;
+
+    switch (detail.type) {
+      case 'chat.new_message':
+        appendLiveMessage(data as unknown as Message);
+        break;
+      case 'chat.read':
+        // Other participant marked read — nothing to render here yet.
+        break;
+      case 'chat.reaction_added':
+      case 'chat.reaction_removed':
+        applyReactionDelta(data as { message_id: string; reactions?: Message['reactions'] });
+        break;
+    }
+  }
+
+  function appendLiveMessage(incoming: Message) {
+    // Outbound echoes: the user already sees their own bubble from the
+    // optimistic `handleSend` append, so skip duplicates keyed by id.
+    if (messages.some((m) => m.id === incoming.id)) return;
+    messages = [...messages, incoming];
+    scrollToBottom();
+    // Eagerly mark read so the badge doesn't linger while the tab is focused.
+    if (incoming.sender.id !== userId) {
+      void markConversationRead(conversationId);
+    }
+  }
+
+  function applyReactionDelta({
+    message_id,
+    reactions,
+  }: {
+    message_id: string;
+    reactions?: Message['reactions'];
+  }) {
+    if (!reactions) return;
+    messages = messages.map((m) => (m.id === message_id ? { ...m, reactions } : m));
+  }
 
   async function loadMore() {
     if (!cursor || !hasMore || loadingMore) return;
@@ -78,6 +147,7 @@
     try {
       const msg = await sendMessage(conversationId, { content });
       messages = [...messages, msg];
+      triggerRipple();
       scrollToBottom();
     } catch {
       // Error sending
@@ -92,8 +162,99 @@
     });
   }
 
+  // Toggled true for ~600ms after a new bubble is appended; bubbles
+  // read this via :global(.messages-container.rippling) and run a
+  // brief, staggered upward bounce.
+  let rippling = $state(false);
+  let rippleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function triggerRipple() {
+    rippling = true;
+    if (rippleTimer) clearTimeout(rippleTimer);
+    rippleTimer = setTimeout(() => {
+      rippling = false;
+    }, 600);
+  }
+
   function goBack() {
     goto('/messages');
+  }
+
+  let confirmingDeleteConv = $state(false);
+  let deletingConv = $state(false);
+
+  async function handleDeleteConversation() {
+    if (deletingConv) return;
+    deletingConv = true;
+    try {
+      await deleteConversation(conversationId);
+      // Let the layout drop this row from the sidebar immediately
+      // — the backend doesn't (yet) broadcast conversation-level
+      // deletes, and a full refetch on navigate would flicker.
+      window.dispatchEvent(
+        new CustomEvent('conversation-deleted', { detail: { id: conversationId } }),
+      );
+      addToast('Conversation deleted', 'success');
+      goto('/messages');
+    } catch {
+      addToast('Failed to delete conversation', 'error');
+      deletingConv = false;
+      confirmingDeleteConv = false;
+    }
+  }
+
+  async function handleDeleteMessage(messageId: string) {
+    try {
+      await apiDeleteMessage(conversationId, messageId);
+      messages = messages.filter((m) => m.id !== messageId);
+    } catch {
+      addToast('Failed to delete message', 'error');
+    }
+  }
+
+  async function handleEditMessage(messageId: string, content: string) {
+    try {
+      const updated = await apiEditMessage(conversationId, messageId, content);
+      messages = messages.map((m) => (m.id === messageId ? { ...m, ...updated } : m));
+    } catch (e: unknown) {
+      const err = e as { body?: { error?: string; message?: string } };
+      if (err?.body?.error === 'message.edit_window_expired') {
+        addToast(err.body.message || 'Edit window has closed', 'error');
+      } else {
+        addToast('Failed to edit message', 'error');
+      }
+      throw e;
+    }
+  }
+
+  async function handleReactMessage(messageId: string, emoji: string) {
+    try {
+      await addMessageReaction(conversationId, messageId, emoji);
+      // Optimistic update — bump the count locally so the user sees
+      // their reaction immediately. Server-side broadcast will
+      // reconcile state for the other participant(s).
+      const me = { id: userId, handle: '', display_name: null };
+
+      messages = messages.map((m) => {
+        if (m.id !== messageId) return m;
+        const existing = m.reactions?.find((r) => r.emoji === emoji);
+        const reactions = existing
+          ? m.reactions!.map((r) =>
+              r.emoji === emoji
+                ? { ...r, count: r.count + 1, accounts: [...r.accounts, me] }
+                : r,
+            )
+          : [...(m.reactions ?? []), { emoji, count: 1, accounts: [me] }];
+        return { ...m, reactions };
+      });
+    } catch (e: unknown) {
+      const err = e as { body?: { error?: string; message?: string } };
+      if (err?.body?.error === 'reaction.premium_required') {
+        addToast(err.body.message || 'That reaction needs a premium tier', 'error');
+      } else {
+        addToast('Failed to react', 'error');
+      }
+    }
   }
 
   function shouldShowAvatar(index: number): boolean {
@@ -113,11 +274,12 @@
         <polyline points="15 18 9 12 15 6" />
       </svg>
     </button>
-    {#if avatarUser}
-      <Avatar src={avatarUser.avatar_url} name={avatarUser.display_name || avatarUser.handle} size="sm" />
-    {/if}
-    <h1 class="detail-title">
-      {displayName}
+
+    <div class="detail-header-strip">
+      <ParticipantStrip participants={otherParticipants} />
+    </div>
+
+    <div class="detail-header-meta">
       {#if conversation?.encryption_status === 'e2ee'}
         <span
           class="material-symbols-outlined header-encryption header-e2ee"
@@ -137,15 +299,60 @@
           aria-label="Not encrypted (federated)"
         >lock_open</span>
       {/if}
-    </h1>
+    </div>
+
+    <div class="detail-header-actions">
+      <button
+        type="button"
+        class="header-action header-action-danger"
+        onclick={() => (confirmingDeleteConv = true)}
+        title="Delete conversation"
+        aria-label="Delete conversation"
+      >
+        <span class="material-symbols-outlined">delete</span>
+        <span class="header-action-label">Delete</span>
+      </button>
+    </div>
   </div>
+
+  {#if confirmingDeleteConv}
+    <div
+      class="confirm-banner"
+      role="alertdialog"
+      aria-live="polite"
+      transition:slide={{ duration: 200, easing: cubicOut }}
+    >
+      <span>
+        Delete this conversation from your inbox? The other person
+        keeps their copy. You can't undo this for yourself.
+      </span>
+      <div class="confirm-actions">
+        <button
+          type="button"
+          class="btn btn-ghost"
+          onclick={() => (confirmingDeleteConv = false)}
+          disabled={deletingConv}
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="btn btn-danger"
+          onclick={handleDeleteConversation}
+          disabled={deletingConv}
+        >
+          {deletingConv ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+    </div>
+  {/if}
 
   {#if loading}
     <div class="detail-loading">
       <Spinner />
     </div>
   {:else}
-    <div class="messages-container" role="log" aria-label="Messages">
+    <div class="messages-container" class:rippling role="log" aria-label="Messages">
       {#if hasMore && messages.length > 0}
         <button type="button" class="load-more-btn" onclick={loadMore} disabled={loadingMore}>
           {loadingMore ? 'Loading...' : 'Load older messages'}
@@ -153,11 +360,16 @@
       {/if}
 
       {#each messages as message, i (message.id)}
-        <MessageBubble
-          {message}
-          isOwn={message.sender.id === userId}
-          showAvatar={shouldShowAvatar(i)}
-        />
+        <div class="bubble-slot" style="--ripple-i: {messages.length - 1 - i}">
+          <MessageBubble
+            {message}
+            isOwn={message.sender.id === userId}
+            showAvatar={shouldShowAvatar(i)}
+            ondelete={handleDeleteMessage}
+            onreact={handleReactMessage}
+            onedit={handleEditMessage}
+          />
+        </div>
       {/each}
 
       {#if typingUser}
@@ -175,8 +387,8 @@
   .conversation-detail {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - var(--header-height));
-    margin: calc(-1 * var(--space-4));
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -186,6 +398,87 @@
     gap: var(--space-3);
     padding: var(--space-3) var(--space-4);
     border-block-end: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .detail-header-strip {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .detail-header-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex-shrink: 0;
+  }
+
+  .detail-header-actions {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .header-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color var(--transition-fast),
+      color var(--transition-fast),
+      border-color var(--transition-fast),
+      transform var(--transition-fast);
+  }
+
+  .header-action:active {
+    transform: scale(0.96);
+  }
+
+  .header-action:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .header-action .material-symbols-outlined {
+    font-size: 18px !important;
+  }
+
+  .header-action-danger:hover {
+    color: var(--color-danger, #b00);
+    border-color: var(--color-danger, #b00);
+    background: var(--color-danger-surface, rgba(176, 0, 0, 0.06));
+  }
+
+  /* Hide the text label on narrow viewports — icon alone is enough. */
+  @media (max-width: 480px) {
+    .header-action-label {
+      display: none;
+    }
+  }
+
+  .confirm-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    background: var(--color-warning-surface, rgba(217, 119, 6, 0.08));
+    border-block-end: 1px solid var(--color-warning, #d97706);
+    font-size: var(--text-sm);
+  }
+
+  .confirm-actions {
+    display: flex;
+    gap: var(--space-2);
     flex-shrink: 0;
   }
 
@@ -207,17 +500,6 @@
     background: var(--color-surface);
   }
 
-  .detail-title {
-    font-size: var(--text-base);
-    font-weight: 600;
-    color: var(--color-text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-  }
 
   .header-encryption {
     font-size: 16px;
@@ -282,4 +564,5 @@
       display: none;
     }
   }
+
 </style>

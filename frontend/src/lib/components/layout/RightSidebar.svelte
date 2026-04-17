@@ -8,7 +8,7 @@
   let {
     suggestions = []
   }: {
-    suggestions?: { handle: string; display_name: string; avatar_url: string | null }[];
+    suggestions?: { handle: string; acct?: string; display_name: string; avatar_url: string | null }[];
   } = $props();
 
   let trending: { tag: string; count: number }[] = $state([]);
@@ -20,6 +20,7 @@
   interface NewUser {
     id: string;
     handle: string;
+    acct?: string;
     display_name: string | null;
     avatar_url: string | null;
     bio: string | null;
@@ -136,7 +137,7 @@
                     <span class="promoted-badge">Promoted</span>
                   {/if}
                 </span>
-                <span class="suggestion-handle">@{person.handle}</span>
+                <span class="suggestion-handle">@{person.acct || person.handle}</span>
               </div>
             </a>
           </li>
@@ -160,7 +161,7 @@
               </div>
               <div class="new-user-info">
                 <span class="new-user-name">{user.display_name || user.handle}</span>
-                <span class="new-user-meta">@{user.handle} &middot; {timeAgo(user.joined_at)}</span>
+                <span class="new-user-meta">@{user.acct || user.handle} &middot; {timeAgo(user.joined_at)}</span>
               </div>
               <span class="new-user-badge">New</span>
             </a>

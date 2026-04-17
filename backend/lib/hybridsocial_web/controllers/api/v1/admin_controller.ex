@@ -2269,7 +2269,7 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
       acct: acct,
       display_name: identity.display_name,
       avatar_url: identity.avatar_url,
-      type: identity.type,
+      type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
       domain: domain,
       is_local: is_local,
       is_suspended: identity.is_suspended,

@@ -1,0 +1,63 @@
+# CrowdSec email notifier — batched digest of new IP bans.
+#
+# Behavior:
+#   * Buffers alerts in memory for up to 10 minutes (group_wait).
+#   * OR flushes early when 25 events accumulate (group_threshold).
+#   * Sends one email per flush with a table of (IP, country, AS,
+#     scenario, decision_duration) per row.
+#
+# All SMTP creds come from the same env vars the app uses for
+# transactional email — one place to rotate.
+
+type: email
+name: email_default
+log_level: info
+
+# Group within a 10-minute window before flushing. Catches bursts
+# during a coordinated scan as one email instead of dozens.
+group_wait: 10m
+group_threshold: 25
+
+# Flush any leftover queued alerts at this cadence even if neither
+# threshold has been hit (so the last few of a slow trickle aren't
+# buffered indefinitely).
+max_retry: 3
+timeout: 20s
+
+# ---- SMTP connection ----
+smtp_host: "{{ env "SMTP_HOST" }}"
+smtp_port: {{ env "SMTP_PORT" | default 587 }}
+smtp_username: "{{ env "SMTP_USER" }}"
+smtp_password: "{{ env "SMTP_PASSWORD" }}"
+sender_email: "{{ env "MAIL_FROM" }}"
+sender_name: "HybridSocial Security"
+receiver_emails:
+  - "{{ env "CROWDSEC_NOTIFY_EMAIL_TO" }}"
+encryption_type: "starttls"
+auth_type: "login"
+
+# ---- Email content ----
+format: |
+  Subject: [HybridSocial] CrowdSec banned {{ len . }} new IP(s)
+
+  CrowdSec applied {{ len . }} new ban decision(s) in the last
+  10-minute window. Review the table below and verify any false
+  positives in the dashboard:
+
+  {{range . -}}
+  --------------------------------------------------------------
+  IP             : {{.Source.IP}}
+  AS             : {{.Source.AsNumber}} ({{.Source.AsName}})
+  Country        : {{.Source.Cn}}
+  Scenario       : {{.Scenario}}
+  Triggered at   : {{.StartAt}}
+  Events count   : {{.EventsCount}}
+  Decisions      :
+  {{range .Decisions -}}
+    - {{.Type}} for {{.Duration}} (origin: {{.Origin}}, scope: {{.Scope}})
+  {{end}}
+  {{end}}
+  --------------------------------------------------------------
+
+  Review at: cscli decisions list
+  Whitelist if FP: cscli decisions delete --ip <IP>

@@ -1,0 +1,130 @@
+# Federation testbed Caddyfile.
+#
+# Four sites, all with auto Let's Encrypt:
+#   * arab.place                   → HybridSocial main app
+#   * media.arab.place             → HybridSocial user-upload origin
+#   * mastodon.arab.place          → Mastodon main app
+#   * media-mastodon.arab.place    → (reserved; Mastodon serves its
+#                                    own media off the main host but
+#                                    cert is provisioned for future
+#                                    when we move to S3-backed media)
+#
+# All must be publicly resolvable for ACME to succeed and for the
+# instances to fetch each other's actor JSON.
+
+{
+	email {$ACME_EMAIL}
+}
+
+# ----- HybridSocial main domain -----
+arab.place {
+	# WebSocket streaming — separate from the rest so we don't break
+	# long-lived connections.
+	@streaming path /api/v1/streaming/*
+	handle @streaming {
+		reverse_proxy hs_backend:4000 {
+			transport http {
+				read_timeout 0
+			}
+		}
+	}
+
+	# ActivityPub federation paths + REST API → Phoenix
+	@api path /api/* /.well-known/* /nodeinfo/* /inbox /users/* /actors/* /activities/* /oauth/* /media/* /uploads/* /posts/* /dm/*
+	handle @api {
+		reverse_proxy hs_backend:4000
+	}
+
+	# Everything else → SvelteKit
+	handle {
+		reverse_proxy hs_frontend:3000
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	encode gzip zstd
+
+	log {
+		output file /data/access-arab.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+		format json
+	}
+}
+
+# ----- HybridSocial media domain -----
+# Separate origin for user uploads — keeps cookies + scripts off the
+# media path so a hostile upload can't piggyback on the main site.
+media.arab.place {
+	header {
+		X-Content-Type-Options nosniff
+		Content-Security-Policy "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'"
+		X-Frame-Options DENY
+		-Server
+		-Set-Cookie
+	}
+
+	handle /uploads/* {
+		reverse_proxy hs_backend:4000
+	}
+
+	handle /proxy/media/* {
+		reverse_proxy hs_backend:4000
+	}
+
+	handle {
+		respond "Not Found" 404
+	}
+
+	encode gzip zstd
+}
+
+# ----- Mastodon main domain -----
+mastodon.arab.place {
+	# Streaming API → mastodon_streaming (port 4000 inside container)
+	@streaming path /api/v1/streaming/*
+	handle @streaming {
+		reverse_proxy mastodon_streaming:4000
+	}
+
+	# Everything else → mastodon_web (puma, port 3000)
+	handle {
+		reverse_proxy mastodon_web:3000
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	# Mastodon serves uploaded media itself but enable compression for
+	# the HTML / JSON responses.
+	encode gzip zstd
+
+	log {
+		output file /data/access-mastodon.log {
+			roll_size 50mb
+			roll_keep 3
+		}
+		format json
+	}
+}
+
+# ----- Mastodon media reservation -----
+# Cert provisioned now so a future Mastodon S3 split has TLS ready.
+# Today Mastodon serves its own media off mastodon.arab.place; this
+# block 404s anything that hits it directly.
+media-mastodon.arab.place {
+	respond "Not configured" 404
+	header -Server
+}

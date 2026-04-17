@@ -41,7 +41,9 @@ defmodule Hybridsocial.Application do
             # Activity expiration cleanup
             Hybridsocial.Federation.ActivityExpirationWorker,
             # Story expiry (hard-deletes expired ephemeral stories)
-            Hybridsocial.Social.StoryExpiryWorker
+            Hybridsocial.Social.StoryExpiryWorker,
+            # Media proxy cache TTL + LRU eviction
+            Hybridsocial.Media.MediaProxyCacheWorker
           ],
           else: []
         ) ++

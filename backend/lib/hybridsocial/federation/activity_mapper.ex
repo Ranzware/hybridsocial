@@ -46,10 +46,17 @@ defmodule Hybridsocial.Federation.ActivityMapper do
     visibility = determine_visibility(ap_object)
     post_type = determine_post_type(ap_object)
 
+    # `content` is the plaintext column; `content_html` holds the
+    # rendered HTML we display. Remote peers send HTML in `content`,
+    # so we strip it here — the same stripper is reused by the DM
+    # ingest path so plaintext extraction is consistent across both.
+    raw_html = ap_object["content"]
+    plaintext = Hybridsocial.Content.HtmlStripper.to_plaintext(raw_html)
+
     attrs = %{
       "ap_id" => ap_object["id"],
-      "content" => ap_object["content"],
-      "content_html" => ap_object["content"],
+      "content" => plaintext,
+      "content_html" => raw_html,
       "post_type" => post_type,
       "visibility" => visibility,
       "sensitive" => ap_object["sensitive"] || false,

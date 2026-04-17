@@ -57,7 +57,11 @@ defmodule HybridsocialWeb.Endpoint do
     parsers: [:urlencoded, {:multipart, length: 100_000_000}, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library(),
-    length: 1_000_000
+    length: 1_000_000,
+    # Stash raw body on AP federation POSTs so DigestPlug can verify
+    # against the exact bytes the peer sent — re-encoded JSON breaks
+    # signature digests because key order + whitespace differ.
+    body_reader: {HybridsocialWeb.Plugs.RawBodyReader, :read_body, []}
 
   plug Plug.MethodOverride
   plug Plug.Head

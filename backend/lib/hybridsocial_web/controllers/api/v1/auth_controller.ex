@@ -218,7 +218,7 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
     |> put_status(:ok)
     |> json(%{
       id: identity.id,
-      type: identity.type,
+      type: HybridsocialWeb.Helpers.Account.api_type(identity.type),
       handle: identity.handle,
       display_name: identity.display_name,
       bio: identity.bio,
@@ -402,30 +402,155 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
     end
   end
 
-  # --- Account recovery ---
+  # --- Account recovery (two-step) ---
+
+  @recover_token_namespace "recovery-v1"
+  @recover_token_max_age 600
 
   @doc """
-  POST /api/v1/auth/recover
-  Body: {handle, recovery_code, new_password, new_password_confirmation}
+  POST /api/v1/auth/recover/validate — step 1.
 
-  Verifies the recovery code against the stored hash, resets the password,
-  revokes all sessions, auto-rotates the code, and returns the new code
-  for the user to save.
+  Body: {handle, recovery_code, otp_code, current_email}
+        plus {pow_prefix, pow_nonce} and {cf_turnstile_token} if
+        the instance has PoW / Turnstile enabled.
+
+  All four matching factors must match and all enabled anti-abuse
+  gates must pass. On success returns a short-lived signed
+  `recovery_token` that the client must present to step 2 within
+  10 minutes.
   """
-  def recover(conn, %{
-        "handle" => handle,
-        "recovery_code" => code,
-        "new_password" => password,
-        "new_password_confirmation" => confirmation
-      }) do
-    case Accounts.recover_account(handle, code, password, confirmation) do
+  def recover_validate(
+        conn,
+        %{
+          "handle" => handle,
+          "recovery_code" => _code,
+          "otp_code" => _otp,
+          "current_email" => _current_email
+        } = params
+      ) do
+    case Accounts.validate_recovery_factors(params) do
+      {:ok, identity} ->
+        token =
+          Phoenix.Token.sign(
+            HybridsocialWeb.Endpoint,
+            @recover_token_namespace,
+            identity.id
+          )
+
+        Moderation.log(
+          identity.id,
+          "auth.recover_validated",
+          "identity",
+          identity.id,
+          %{handle: handle},
+          get_client_ip(conn)
+        )
+
+        json(conn, %{
+          status: "ok",
+          recovery_token: token,
+          expires_in: @recover_token_max_age
+        })
+
+      {:error, :pow_required} ->
+        conn |> put_status(:forbidden) |> json(%{error: "auth.pow_required"})
+
+      {:error, reason}
+      when reason in [
+             :captcha_failed,
+             :captcha_service_unavailable,
+             :captcha_parse_error,
+             :missing_token
+           ] ->
+        conn |> put_status(:forbidden) |> json(%{error: "auth.captcha_failed"})
+
+      {:error, :invalid_credentials} ->
+        Moderation.log(
+          nil,
+          "auth.recover_validate_failed",
+          nil,
+          nil,
+          %{handle: handle},
+          get_client_ip(conn)
+        )
+
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{error: "auth.invalid_recovery"})
+
+      {:error, reason} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: "auth.recovery_failed", reason: inspect(reason)})
+    end
+  end
+
+  def recover_validate(conn, _params) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{
+      error: "validation.failed",
+      required: ~w(handle recovery_code otp_code current_email)
+    })
+  end
+
+  @doc """
+  POST /api/v1/auth/recover/complete — step 2.
+
+  Body: {recovery_token, new_email, new_password, new_password_confirmation}
+
+  Consumes the token issued by step 1, applies the password + email
+  reset, revokes all sessions, rotates the recovery code, and
+  returns the new code.
+  """
+  def recover_complete(conn, %{
+        "recovery_token" => token,
+        "new_email" => new_email,
+        "new_password" => new_password,
+        "new_password_confirmation" => new_password_confirmation
+      })
+      when is_binary(token) and is_binary(new_email) and is_binary(new_password) and
+             is_binary(new_password_confirmation) do
+    case Phoenix.Token.verify(
+           HybridsocialWeb.Endpoint,
+           @recover_token_namespace,
+           token,
+           max_age: @recover_token_max_age
+         ) do
+      {:ok, identity_id} ->
+        finish_recovery(conn, identity_id, new_email, new_password, new_password_confirmation)
+
+      {:error, :expired} ->
+        conn |> put_status(:unauthorized) |> json(%{error: "recovery.token_expired"})
+
+      {:error, _reason} ->
+        conn |> put_status(:unauthorized) |> json(%{error: "recovery.token_invalid"})
+    end
+  end
+
+  def recover_complete(conn, _params) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{
+      error: "validation.failed",
+      required: ~w(recovery_token new_email new_password new_password_confirmation)
+    })
+  end
+
+  defp finish_recovery(conn, identity_id, new_email, new_password, new_password_confirmation) do
+    case Accounts.complete_recovery(
+           identity_id,
+           new_email,
+           new_password,
+           new_password_confirmation
+         ) do
       {:ok, new_code, identity} ->
         Moderation.log(
           identity.id,
           "auth.recovered",
           "identity",
           identity.id,
-          %{},
+          %{handle: identity.handle},
           get_client_ip(conn)
         )
 
@@ -435,12 +560,10 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
           new_recovery_code: new_code
         })
 
-      {:error, :invalid_credentials} ->
-        conn
-        |> put_status(:unauthorized)
-        |> json(%{error: "auth.invalid_recovery"})
+      {:error, :not_found} ->
+        conn |> put_status(:unauthorized) |> json(%{error: "recovery.token_invalid"})
 
-      {:error, :invalid_password, changeset} ->
+      {:error, :invalid_input, changeset} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{error: "validation.failed", details: format_errors(changeset)})
@@ -450,15 +573,6 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
         |> put_status(:unprocessable_entity)
         |> json(%{error: "auth.recovery_failed", reason: inspect(reason)})
     end
-  end
-
-  def recover(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: "validation.failed",
-      required: ~w(handle recovery_code new_password new_password_confirmation)
-    })
   end
 
   # --- PoW Challenge ---

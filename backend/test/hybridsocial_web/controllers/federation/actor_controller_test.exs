@@ -44,6 +44,43 @@ defmodule HybridsocialWeb.Federation.ActorControllerTest do
       conn = get(conn, "/actors/#{Ecto.UUID.generate()}")
       assert json_response(conn, 404)
     end
+
+    test "negotiates Content-Type: application/activity+json", %{conn: conn, identity: identity} do
+      conn =
+        conn
+        |> put_req_header("accept", "application/activity+json")
+        |> get("/actors/#{identity.id}")
+
+      [content_type] = get_resp_header(conn, "content-type")
+      assert String.starts_with?(content_type, "application/activity+json")
+    end
+
+    test "negotiates Content-Type: application/ld+json with profile", %{
+      conn: conn,
+      identity: identity
+    } do
+      conn =
+        conn
+        |> put_req_header(
+          "accept",
+          ~s|application/ld+json; profile="https://www.w3.org/ns/activitystreams"|
+        )
+        |> get("/actors/#{identity.id}")
+
+      [content_type] = get_resp_header(conn, "content-type")
+      assert String.starts_with?(content_type, "application/ld+json")
+      assert String.contains?(content_type, "profile")
+    end
+
+    test "falls back to application/activity+json when Accept is missing", %{
+      conn: conn,
+      identity: identity
+    } do
+      conn = get(conn, "/actors/#{identity.id}")
+
+      [content_type] = get_resp_header(conn, "content-type")
+      assert String.starts_with?(content_type, "application/activity+json")
+    end
   end
 
   describe "GET /actors/:id/followers" do

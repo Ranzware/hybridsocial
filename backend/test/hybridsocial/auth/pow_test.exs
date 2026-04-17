@@ -2,24 +2,58 @@ defmodule Hybridsocial.Auth.PoWTest do
   use ExUnit.Case, async: true
 
   alias Hybridsocial.Auth.PoW
+  alias Hybridsocial.Cache
 
   describe "verify/2" do
-    test "verifies a valid proof of work" do
-      prefix = :crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower)
-      diff = 4
-      nonce = find_nonce(prefix, diff)
-      # Verify manually (not via PoW.verify which uses global config difficulty)
-      hash = :crypto.hash(:sha256, prefix <> nonce)
-      zeros = count_zeros(hash)
-      assert zeros >= diff
+    test "accepts a valid solution to a server-issued challenge" do
+      challenge = PoW.generate_challenge(4)
+      nonce = find_nonce(challenge.prefix, 4)
+
+      assert PoW.verify(challenge.prefix, nonce)
     end
 
-    test "rejects invalid proof" do
-      refute PoW.verify("test_prefix", "bad_nonce")
+    test "single-use: the same challenge can't be verified twice" do
+      challenge = PoW.generate_challenge(4)
+      nonce = find_nonce(challenge.prefix, 4)
+
+      assert PoW.verify(challenge.prefix, nonce)
+      # Re-submitting the same (prefix, nonce) pair must fail because
+      # the challenge was consumed.
+      refute PoW.verify(challenge.prefix, nonce)
+    end
+
+    test "rejects a prefix the server never issued (client-generated)" do
+      fake_prefix = :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
+      nonce = find_nonce(fake_prefix, 4)
+
+      refute PoW.verify(fake_prefix, nonce)
+    end
+
+    test "rejects valid prefix but wrong nonce" do
+      challenge = PoW.generate_challenge(4)
+
+      refute PoW.verify(challenge.prefix, "bad_nonce")
+    end
+
+    test "rejects when the challenge has expired / been evicted" do
+      challenge = PoW.generate_challenge(4)
+      nonce = find_nonce(challenge.prefix, 4)
+
+      # Simulate expiry by deleting the cache entry manually.
+      Cache.delete("pow:#{challenge.prefix}")
+
+      refute PoW.verify(challenge.prefix, nonce)
     end
 
     test "rejects nil inputs" do
       refute PoW.verify(nil, nil)
+    end
+
+    test "rejects non-binary nonce against a valid prefix" do
+      challenge = PoW.generate_challenge(4)
+
+      refute PoW.verify(challenge.prefix, nil)
+      refute PoW.verify(challenge.prefix, 12_345)
     end
   end
 

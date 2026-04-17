@@ -6,6 +6,7 @@
   import Dropdown from '$lib/components/ui/Dropdown.svelte';
   import VerifiedBadge from '$lib/components/ui/VerifiedBadge.svelte';
   import RoleBadge from '$lib/components/ui/RoleBadge.svelte';
+  import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
 
   let {
     account,
@@ -151,13 +152,14 @@
         {#if account.is_verified}
           <VerifiedBadge size="md" />
         {/if}
+        <AccountTypeIndicator account={account} size={16} />
         {#if (account as any).badges}
           {#each (account as any).badges as badge (badge.type)}
             <RoleBadge type={badge.type} label={badge.label} size="md" />
           {/each}
         {/if}
       </h1>
-      <span class="profile-handle">@{account.handle}</span>
+      <span class="profile-handle">@{account.acct || account.handle}</span>
       {#if relationship?.followed_by && !isOwnProfile}
         <span class="follows-you-badge">Follows you</span>
       {/if}
@@ -192,7 +194,7 @@
 {#if showReportModal}
   <div class="report-overlay" onclick={cancelReport} role="dialog" aria-modal="true" aria-label="Report user">
     <div class="report-dialog" onclick={(e) => e.stopPropagation()}>
-      <h3 class="report-title">Report @{account.handle}</h3>
+      <h3 class="report-title">Report @{account.acct || account.handle}</h3>
       <p class="report-subtitle">Why are you reporting this account?</p>
 
       <div class="report-form">

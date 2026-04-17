@@ -38,8 +38,70 @@
     try {
       const conv = await createConversation([accountId]);
       goto(`/messages/${conv.id}`);
-    } catch {
+    } catch (e: unknown) {
       creating = false;
+
+      // Peer software doesn't speak a real DM primitive. Instead of
+      // erroring, silently pivot to composing a direct-visibility
+      // post addressed to the same recipient — that's how Mastodon
+      // users actually receive "DMs" today.
+      const err = e as {
+        body?: {
+          error?: string;
+          fallback?: string;
+          recipient?: {
+            handle?: string;
+            display_name?: string | null;
+            ap_actor_url?: string;
+          };
+        };
+      };
+
+      if (
+        err?.body?.error === 'dm.not_supported_by_peer' &&
+        err?.body?.fallback === 'direct_post' &&
+        err.body.recipient
+      ) {
+        const r = err.body.recipient;
+        const mention = remoteMentionHandle(r.handle, r.ap_actor_url);
+        // Leave /messages/new first so the composer (hidden on DM
+        // routes) renders, then dispatch the open event. A frame of
+        // delay is enough for the route transition to mount the FAB
+        // layout.
+        goto('/home');
+        setTimeout(() => {
+          window.dispatchEvent(
+            new CustomEvent('open-composer', {
+              detail: {
+                prefill: `${mention} `,
+                visibility: 'direct',
+              },
+            }),
+          );
+        }, 50);
+      }
+    }
+  }
+
+  // Convert a bare handle + actor URL into a federation-safe mention
+  // token. We DON'T use the `handle` field from the backend —
+  // that's our locally-munged collision-safe string
+  // (e.g. `tester_mastodon_dd1e97`), which the remote server won't
+  // recognize. Instead we pull the real handle from the AP actor
+  // URL's last path segment — Mastodon, Pleroma, Misskey all use
+  // `/users/{handle}` or `/@{handle}` shapes.
+  function remoteMentionHandle(handle?: string, apActorUrl?: string): string {
+    if (!apActorUrl) return handle ? `@${handle}` : '';
+
+    try {
+      const u = new URL(apActorUrl);
+      const segments = u.pathname.split('/').filter(Boolean);
+      const remoteHandle = segments[segments.length - 1] || handle || '';
+      // Strip leading `@` when Mastodon-style `/@handle` paths are used.
+      const clean = remoteHandle.startsWith('@') ? remoteHandle.slice(1) : remoteHandle;
+      return clean ? `@${clean}@${u.host}` : '';
+    } catch {
+      return handle ? `@${handle}` : '';
     }
   }
 

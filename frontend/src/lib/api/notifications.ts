@@ -22,7 +22,12 @@ export function markNotificationRead(id: string): Promise<void> {
 }
 
 export function markAllNotificationsRead(): Promise<void> {
-  return api.post('/api/v1/notifications/read_all');
+  // The backend route is `/clear` — server-side it flips every
+  // unread row to read, not a hard delete. Separate name from the
+  // client function because "clear the badge" is what callers
+  // mean; `clearAllNotifications` is the alias kept for callers
+  // that already use it.
+  return api.post('/api/v1/notifications/clear');
 }
 
 export function clearAllNotifications(): Promise<void> {

@@ -25,6 +25,10 @@ export function getPost(id: string): Promise<Post> {
   return api.get(`/api/v1/statuses/${id}`);
 }
 
+export function getPostsByIds(ids: string[]): Promise<Post[]> {
+  return api.post('/api/v1/statuses/by_ids', { ids });
+}
+
 export function editPost(id: string, data: { content?: string; sensitive?: boolean; spoiler_text?: string; media_ids?: string[] }): Promise<Post> {
   return api.put(`/api/v1/statuses/${id}`, data);
 }

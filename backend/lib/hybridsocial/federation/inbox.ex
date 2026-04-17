@@ -9,6 +9,7 @@ defmodule Hybridsocial.Federation.Inbox do
   alias Hybridsocial.Repo
   alias Hybridsocial.Accounts
   alias Hybridsocial.Accounts.Identity
+  alias Hybridsocial.Media.MediaFile
   alias Hybridsocial.Social
   alias Hybridsocial.Social.Post
   alias Hybridsocial.Social.Posts
@@ -117,8 +118,25 @@ defmodule Hybridsocial.Federation.Inbox do
       case result do
         {:ok, follow} ->
           if status == :accepted do
+            # Send Accept back to the remote side so they flip the
+            # FollowRequest into a confirmed Follow on their end.
+            # Without this, the peer's side sits in pending forever
+            # and our accept is invisible to them.
+            publish_follow_accept(local_identity, remote_identity, activity)
             Logger.info("Auto-accepted follow from #{actor_ap_id}")
           end
+
+          # Bell the followed user. follow_request vs follow differ
+          # in type so the UI can render "accept / decline" buttons
+          # for locked accounts.
+          notification_type =
+            if status == :pending, do: "follow_request", else: "follow"
+
+          Hybridsocial.Notifications.create_notification(%{
+            recipient_id: local_identity.id,
+            actor_id: remote_identity.id,
+            type: notification_type
+          })
 
           {:ok, %{follow: follow, activity: activity}}
 
@@ -129,6 +147,55 @@ defmodule Hybridsocial.Federation.Inbox do
   end
 
   defp handle_follow(_), do: {:error, :invalid_follow_activity}
+
+  # Builds an Accept{Follow} activity wrapping the original Follow
+  # and posts it to the remote actor's inbox over a signed HTTP
+  # request. Best-effort — failures log but don't block the local
+  # follow record (we can retry via the publisher's failed-delivery
+  # backoff).
+  defp publish_follow_accept(local_identity, remote_identity, follow_activity) do
+    # Mastodon wants the Accept's `object` to be either the Follow's
+    # `id` URI OR the embedded Follow activity. ActivityBuilder takes
+    # the URI; replace `object` with the full embedded Follow for max
+    # compatibility (Mastodon accepts both, Pleroma prefers embedded).
+    follow_id = follow_activity["id"]
+
+    accept =
+      Hybridsocial.Federation.ActivityBuilder.build_accept_follow(
+        local_identity,
+        follow_id
+      )
+      |> Map.put("object", follow_activity)
+
+    inbox_url = remote_identity.inbox_url || derive_inbox_url(remote_identity)
+
+    if is_binary(inbox_url) and inbox_url != "" do
+      Task.Supervisor.start_child(
+        Hybridsocial.Federation.DeliveryTaskSupervisor,
+        fn ->
+          case Hybridsocial.Federation.Publisher.deliver(accept, inbox_url, local_identity) do
+            {:ok, _} ->
+              Logger.info("Accept{Follow} delivered to #{inbox_url}")
+
+            {:error, reason} ->
+              Logger.warning(
+                "Accept{Follow} delivery failed to #{inbox_url}: #{inspect(reason)}"
+              )
+          end
+        end
+      )
+    else
+      Logger.warning(
+        "No inbox URL for #{remote_identity.ap_actor_url} — Accept not delivered"
+      )
+    end
+  end
+
+  defp derive_inbox_url(%Identity{ap_actor_url: ap_url}) when is_binary(ap_url) do
+    ap_url <> "/inbox"
+  end
+
+  defp derive_inbox_url(_), do: nil
 
   # --- Accept ---
   # A remote actor accepted our follow request.
@@ -169,8 +236,34 @@ defmodule Hybridsocial.Federation.Inbox do
     handle_poll_answer(actor_ap_id, object)
   end
 
+  # Only Pleroma/Akkoma's native ChatMessage type routes to the DM
+  # inbox. Everything else — including Mastodon's `visibility: direct`
+  # statuses that carry `directMessage: true` — is a Note and flows
+  # into `handle_create_post`, where `ActivityMapper.to_post` preserves
+  # the "direct" visibility. Mastodon-class servers can't thread real
+  # DMs anyway (each reply arrives as a standalone status), so we
+  # respect the sender's intent: ChatMessage means chat, Note means
+  # post, no exceptions.
+  defp handle_create(%{"actor" => actor_ap_id, "object" => %{"type" => "ChatMessage"} = object})
+       when is_binary(actor_ap_id) do
+    handle_direct_message(actor_ap_id, object)
+  end
+
   defp handle_create(%{"actor" => actor_ap_id, "object" => object})
        when is_binary(actor_ap_id) and is_map(object) do
+    handle_create_post(actor_ap_id, object)
+  end
+
+  defp handle_create(%{"actor" => actor_ap_id, "object" => object_id})
+       when is_binary(actor_ap_id) and is_binary(object_id) do
+    # Object is just an ID reference -- we'd need to fetch it.
+    # For now, return an error since we can't process inline.
+    {:error, :object_must_be_embedded}
+  end
+
+  defp handle_create(_), do: {:error, :invalid_create_activity}
+
+  defp handle_create_post(actor_ap_id, object) do
     with {:ok, remote_identity} <- resolve_or_create_remote_identity(actor_ap_id) do
       post_attrs = ActivityMapper.to_post(object)
 
@@ -184,7 +277,7 @@ defmodule Hybridsocial.Federation.Inbox do
 
         {:flag, reason} ->
           # Allow the post but queue it for moderation review
-          result = insert_remote_post(post_attrs, remote_identity)
+          result = insert_remote_post(post_attrs, remote_identity, object)
 
           case result do
             {:ok, post} ->
@@ -203,21 +296,12 @@ defmodule Hybridsocial.Federation.Inbox do
           end
 
         _ ->
-          insert_remote_post(post_attrs, remote_identity)
+          insert_remote_post(post_attrs, remote_identity, object)
       end
     end
   end
 
-  defp handle_create(%{"actor" => actor_ap_id, "object" => object_id})
-       when is_binary(actor_ap_id) and is_binary(object_id) do
-    # Object is just an ID reference -- we'd need to fetch it.
-    # For now, return an error since we can't process inline.
-    {:error, :object_must_be_embedded}
-  end
-
-  defp handle_create(_), do: {:error, :invalid_create_activity}
-
-  defp insert_remote_post(post_attrs, remote_identity) do
+  defp insert_remote_post(post_attrs, remote_identity, ap_object) do
     case get_post_by_ap_id(post_attrs["ap_id"]) do
       nil ->
         parent_ap_id = post_attrs["parent_ap_id"]
@@ -238,6 +322,21 @@ defmodule Hybridsocial.Federation.Inbox do
           |> maybe_put_content_html(post_attrs["content_html"])
           |> Repo.insert()
 
+        # Persist any attachments alongside the post — these become
+        # MediaFile rows with remote_url set, which the serializer
+        # rewrites through the media proxy at render time.
+        case result do
+          {:ok, post} ->
+            persist_remote_attachments(post, ap_object, remote_identity)
+            persist_remote_mentions(post, ap_object)
+            Posts.broadcast_direct_post_to_participants(post)
+            notify_remote_reply(post, parent_id)
+            notify_remote_quote(post, ap_object)
+
+          _ ->
+            :ok
+        end
+
         # If parent couldn't be resolved locally, try backfilling from remote
         case {result, parent_ap_id, parent_id} do
           {{:ok, post}, ap_id, nil} when is_binary(ap_id) ->
@@ -251,6 +350,136 @@ defmodule Hybridsocial.Federation.Inbox do
       existing ->
         {:ok, existing}
     end
+  end
+
+  # AP attachments arrive as a list of objects under `attachment`.
+  # Mastodon/Pleroma/Akkoma all use `Document` for images; some
+  # implementations use `Image`/`Audio`/`Video` directly. We accept
+  # any with a `url` + `mediaType`. Bytes are NOT downloaded here —
+  # the proxy fetches lazily on first user request.
+  # Scan the note's `tag` array for Mentions and link them to local
+  # identities. For direct-visibility posts this is what unlocks access:
+  # a post with `visibility: direct` is viewable by the author plus
+  # anyone in `post_mentions`.
+  defp persist_remote_mentions(%Post{id: post_id, identity_id: author_id} = post, %{"tag" => tags})
+       when is_list(tags) do
+    mentioned_ids =
+      for tag <- tags,
+          is_map(tag),
+          tag["type"] == "Mention",
+          href = tag["href"],
+          is_binary(href),
+          identity = lookup_local_identity_for_mention(href),
+          not is_nil(identity) do
+        %Hybridsocial.Social.PostMention{}
+        |> Hybridsocial.Social.PostMention.changeset(%{
+          post_id: post_id,
+          identity_id: identity.id
+        })
+        |> Repo.insert(on_conflict: :nothing)
+
+        identity.id
+      end
+
+    Hybridsocial.Notifications.notify_mention(author_id, post, Enum.uniq(mentioned_ids))
+
+    :ok
+  end
+
+  defp persist_remote_mentions(_post, _object), do: :ok
+
+  defp notify_remote_reply(_post, nil), do: :ok
+
+  defp notify_remote_reply(%Post{} = post, parent_id) when is_binary(parent_id) do
+    # Only fire when the parent is a local post — the federated
+    # reply only needs a bell for OUR users. Remote-to-remote replies
+    # flowing through our relay would otherwise spam our identities
+    # that aren't involved.
+    case Repo.get(Post, parent_id) do
+      %Post{} = parent ->
+        if Hybridsocial.Federation.LocalUrl.local_actor_url?(
+             parent_author_ap_url(parent.identity_id)
+           ) do
+          Hybridsocial.Notifications.notify_reply(post.identity_id, post, parent)
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp notify_remote_quote(%Post{} = post, %{"quoteUrl" => quote_url}) when is_binary(quote_url) do
+    case get_post_by_ap_id(quote_url) do
+      %Post{identity_id: quoted_author_id} ->
+        Hybridsocial.Notifications.create_notification(%{
+          recipient_id: quoted_author_id,
+          actor_id: post.identity_id,
+          type: "quote",
+          target_type: "post",
+          target_id: post.id
+        })
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp notify_remote_quote(_, _), do: :ok
+
+  defp parent_author_ap_url(identity_id) do
+    case Repo.get(Identity, identity_id) do
+      %Identity{ap_actor_url: url} -> url
+      _ -> nil
+    end
+  end
+
+  # Mentions use `href` pointing at the mentioned actor. For a local
+  # recipient this is our own `/actors/:id`; for remote actors it's
+  # their AP URL. We only care about local matches here — remote
+  # mentions don't grant access to a local post.
+  defp lookup_local_identity_for_mention(href) do
+    lookup_local_identity(href)
+  end
+
+  defp persist_remote_attachments(post, ap_object, remote_identity) do
+    attachments = List.wrap(ap_object["attachment"])
+
+    Enum.each(attachments, fn attachment ->
+      with %{"url" => url} when is_binary(url) <- attachment,
+           media_type <- attachment["mediaType"] || "application/octet-stream",
+           domain when is_binary(domain) <- ActivityMapper.extract_domain(url) do
+        focal_point = attachment["focalPoint"] || []
+
+        attrs = %{
+          identity_id: remote_identity.id,
+          post_id: post.id,
+          content_type: media_type,
+          remote_url: url,
+          remote_origin_domain: domain,
+          alt_text: attachment["name"],
+          width: attachment["width"],
+          height: attachment["height"],
+          duration: attachment["duration"],
+          blurhash: attachment["blurhash"],
+          metadata: %{
+            "ap_type" => attachment["type"],
+            "focal_point" => focal_point
+          }
+        }
+
+        case %MediaFile{}
+             |> MediaFile.remote_changeset(attrs)
+             |> Repo.insert() do
+          {:ok, _} ->
+            :ok
+
+          {:error, changeset} ->
+            Logger.warning(
+              "[inbox] failed to persist remote attachment url=#{url} post=#{post.id} errors=#{inspect(changeset.errors)}"
+            )
+        end
+      end
+    end)
   end
 
   # --- Poll Answer ---
@@ -553,9 +782,13 @@ defmodule Hybridsocial.Federation.Inbox do
   end
 
   @doc """
-  Resolves a remote actor to a local identity.
-  Stub: In production, this looks up the remote_actors table and finds the linked identity.
-  For now, we look up by ap_actor_url on identities.
+  Resolves a remote actor to a local identity row.
+
+  Both local and federated actors share the `identities` table —
+  remote ones are distinguished by `ap_actor_url` being set. This is
+  a deliberate single-table model (vs Mastodon's split accounts +
+  account_aliases tables); it simplifies queries that span both
+  sides of the local/remote boundary.
   """
   def resolve_remote_identity(ap_id) when is_binary(ap_id) do
     case Repo.one(from(i in Identity, where: i.ap_actor_url == ^ap_id)) do
@@ -565,14 +798,16 @@ defmodule Hybridsocial.Federation.Inbox do
   end
 
   @doc """
-  Resolves or creates a local identity stub for a remote actor.
-  Stub: In production, this would create a remote_actor record and link it.
-  For now, we create a minimal identity with the AP ID.
+  Returns the existing identity row for the AP ID, or creates a new
+  one by fetching the remote actor JSON. Enriches existing rows when
+  display_name is missing (handles the case where we previously
+  observed a bare AP ID via mention or follower list before ever
+  resolving the full profile).
   """
   def resolve_or_create_remote_identity(ap_id) when is_binary(ap_id) do
     case Repo.one(from(i in Identity, where: i.ap_actor_url == ^ap_id)) do
       nil ->
-        create_stub_identity_for_remote(ap_id)
+        create_remote_identity(ap_id)
 
       %Identity{display_name: nil} = identity ->
         # Existing stub with no profile data — try to enrich it
@@ -606,7 +841,7 @@ defmodule Hybridsocial.Federation.Inbox do
     end
   end
 
-  defp create_stub_identity_for_remote(ap_id) do
+  defp create_remote_identity(ap_id) do
     domain = ActivityMapper.extract_domain(ap_id)
     handle = generate_remote_handle(ap_id, domain)
     id = Ecto.UUID.generate()
@@ -954,6 +1189,9 @@ defmodule Hybridsocial.Federation.Inbox do
                  |> maybe_put_content_html(post_attrs["content_html"])
                  |> Repo.insert() do
               {:ok, parent_post} ->
+                # Persist any media attachments from the backfilled
+                # parent post too — same proxy-on-demand model.
+                persist_remote_attachments(parent_post, object, remote_identity)
                 # Link the child post to this newly fetched parent
                 link_child_to_parent(child_post_id, parent_post)
                 {:ok, parent_post, grandparent_ap_id}
@@ -1015,10 +1253,16 @@ defmodule Hybridsocial.Federation.Inbox do
   defp normalize_object_id(_), do: nil
 
   defp find_pending_follow(%{"id" => _follow_ap_id}, followee_id) do
-    # Find a pending follow where the followee is the given identity
+    # Find the most recent follow row for this (follower, followee).
+    # We accept BOTH `:pending` (manual-approval flow) and `:accepted`
+    # (auto-accept flow) — the latter happens when our local actor is
+    # not locked: we created the follow as already-accepted, then
+    # Mastodon's confirmation Accept arrives and would otherwise
+    # log `:follow_not_found`. Treating accepted-arrival as a no-op
+    # makes the Accept handler idempotent.
     follow =
       Hybridsocial.Social.Follow
-      |> where([f], f.followee_id == ^followee_id and f.status == :pending)
+      |> where([f], f.followee_id == ^followee_id and f.status in [:pending, :accepted])
       |> order_by([f], desc: f.inserted_at)
       |> limit(1)
       |> Repo.one()
@@ -1057,4 +1301,70 @@ defmodule Hybridsocial.Federation.Inbox do
         {:error, :post_not_found}
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Direct message ingest
+  # ---------------------------------------------------------------------------
+
+  defp handle_direct_message(actor_ap_id, object) do
+    with {:ok, sender} <- resolve_or_create_remote_identity(actor_ap_id),
+         {:ok, recipient} <- find_local_recipient(object) do
+      plaintext = Hybridsocial.Content.HtmlStripper.to_plaintext(object["content"])
+
+      case Hybridsocial.Messaging.ingest_remote_dm(sender, recipient, %{
+             content: plaintext,
+             ap_id: object["id"],
+             in_reply_to: object["inReplyTo"],
+             published: object["published"]
+           }) do
+        {:ok, message} ->
+          Logger.info(
+            "Ingested DM from #{actor_ap_id} into conversation #{message.conversation_id}"
+          )
+
+          {:ok, message}
+
+        {:error, reason} = err ->
+          Logger.warning("DM ingest failed for #{actor_ap_id}: #{inspect(reason)}")
+          err
+      end
+    end
+  end
+
+  # Find the local identity the DM is addressed to — prefers Mention
+  # tags (explicit targets), falls back to scanning `to`/`cc` for an
+  # actor URL on our domain.
+  defp find_local_recipient(object) do
+    candidates =
+      (object |> Map.get("tag", []) |> List.wrap() |> Enum.flat_map(&mention_href/1)) ++
+        List.wrap(object["to"]) ++
+        List.wrap(object["cc"])
+
+    candidates
+    |> Enum.uniq()
+    |> Enum.find_value({:error, :no_local_recipient}, fn url ->
+      case lookup_local_identity(url) do
+        nil -> false
+        identity -> {:ok, identity}
+      end
+    end)
+  end
+
+  defp mention_href(%{"type" => "Mention", "href" => href}) when is_binary(href), do: [href]
+  defp mention_href(_), do: []
+
+  # The href we resolve here is the recipient of a DM Mention — it
+  # must point at one of OUR actors. A fallback by `ap_actor_url`
+  # would also match remote rows (identical URL) and accidentally
+  # deliver the DM into a remote user's local mirror, so we only
+  # accept the local prefix form.
+  defp lookup_local_identity(url) when is_binary(url) do
+    if Hybridsocial.Federation.LocalUrl.local_actor_url?(url) do
+      id = String.replace_prefix(url, Hybridsocial.Federation.LocalUrl.actor_prefix(), "")
+      Repo.get(Identity, id)
+    end
+  end
+
+  defp lookup_local_identity(_), do: nil
+
 end

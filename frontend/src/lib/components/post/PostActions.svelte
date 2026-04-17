@@ -5,6 +5,7 @@
   import { mute, unmute, block, unblock } from '$lib/api/accounts.js';
   import { get } from 'svelte/store';
   import ReactionPicker from './ReactionPicker.svelte';
+  import { markSeen } from '$lib/utils/seen-posts.js';
 
   let {
     post,
@@ -36,7 +37,7 @@
   let bounceReaction = $state(false);
   let floatingEmoji = $state<string | null>(null);
   let showReactionDetail = $state(false);
-  let reactionDetailData = $state<{type: string; count: number; accounts: {id: string; handle: string; display_name: string | null; avatar_url: string | null}[]}[]>([]);
+  let reactionDetailData = $state<{type: string; count: number; accounts: {id: string; handle: string; acct?: string; display_name: string | null; avatar_url: string | null}[]}[]>([]);
   let reactionDetailLoading = $state(false);
   let reactionDetailTab = $state('all');
   let reactions = $state(post.reactions || []);
@@ -120,6 +121,7 @@
     try {
       if (currentReaction === emoji) {
         await api.delete(`/api/v1/statuses/${post.id}/react`);
+        markSeen(post.id);
         // Remove from reactions array
         reactions = reactions
           .map(r => r.name === emoji ? { ...r, count: r.count - 1, me: false } : r)
@@ -130,6 +132,7 @@
         const previousReaction = currentReaction;
         const hadReaction = previousReaction !== null;
         await api.post(`/api/v1/statuses/${post.id}/react`, { type: emoji });
+        markSeen(post.id);
         currentReaction = emoji;
         if (!hadReaction) reactionCount += 1;
 
@@ -734,8 +737,8 @@
                     <span class="reactions-user-emoji">{reactionEmojis[group.type] ?? group.type}</span>
                   </div>
                   <div class="reactions-user-info">
-                    <span class="reactions-user-name">{account.display_name || account.handle}</span>
-                    <span class="reactions-user-handle">@{account.handle}</span>
+                    <span class="reactions-user-name">{account.display_name || account.acct || account.handle}</span>
+                    <span class="reactions-user-handle">@{account.acct || account.handle}</span>
                   </div>
                 </a>
               {/each}

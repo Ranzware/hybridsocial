@@ -6,6 +6,11 @@ defmodule Hybridsocial.Federation.HTTPSignature do
 
   @signed_headers ["(request-target)", "host", "date", "digest"]
 
+  # Per draft-cavage-http-signatures + Mastodon convention, signed
+  # requests must be reasonably fresh. Mastodon rejects with > 12h
+  # skew either way; we mirror that.
+  @signature_max_skew_seconds 12 * 3600
+
   @doc """
   Signs a request with the actor's private key.
   Returns a map of headers to add to the request.
@@ -43,9 +48,78 @@ defmodule Hybridsocial.Federation.HTTPSignature do
   """
   def verify(conn) do
     with {:ok, sig_params} <- parse_signature_header(conn),
+         :ok <- verify_date_freshness(conn),
          {:ok, public_key_pem} <- fetch_public_key(sig_params["keyId"]),
          {:ok, _} <- verify_signature(conn, sig_params, public_key_pem) do
       {:ok, sig_params["keyId"]}
+    end
+  end
+
+  # Date-header freshness gate. Closes the unbounded replay-attack
+  # window — without this, an intercepted signed request would be
+  # accepted forever. Returns :ok within ±12h of now, otherwise
+  # `{:error, :date_invalid | :date_too_old | :date_too_skewed}`.
+  defp verify_date_freshness(conn) do
+    case Plug.Conn.get_req_header(conn, "date") do
+      [date_str | _] ->
+        case parse_http_date(date_str) do
+          {:ok, sent_at} ->
+            skew = DateTime.diff(DateTime.utc_now(), sent_at, :second)
+
+            cond do
+              skew > @signature_max_skew_seconds -> {:error, :date_too_old}
+              skew < -@signature_max_skew_seconds -> {:error, :date_too_skewed}
+              true -> :ok
+            end
+
+          :error ->
+            {:error, :date_invalid}
+        end
+
+      [] ->
+        {:error, :date_missing}
+    end
+  end
+
+  # RFC 7231 IMF-fixdate format: "Sun, 06 Nov 1994 08:49:37 GMT".
+  # The `Calendar.strftime` we use to SIGN matches this exactly. We
+  # also accept ISO-8601 as a fallback in case a peer signs with that
+  # format (some implementations do).
+  defp parse_http_date(str) do
+    case DateTime.from_iso8601(str) do
+      {:ok, dt, _} -> {:ok, dt}
+      _ -> parse_imf_fixdate(str)
+    end
+  end
+
+  defp parse_imf_fixdate(str) do
+    months = %{
+      "Jan" => 1,
+      "Feb" => 2,
+      "Mar" => 3,
+      "Apr" => 4,
+      "May" => 5,
+      "Jun" => 6,
+      "Jul" => 7,
+      "Aug" => 8,
+      "Sep" => 9,
+      "Oct" => 10,
+      "Nov" => 11,
+      "Dec" => 12
+    }
+
+    with [_dow, day, mon, year, time, _tz] <- String.split(str, ~r/[\s,]+/, trim: true),
+         month when is_integer(month) <- months[mon],
+         {day_n, ""} <- Integer.parse(day),
+         {year_n, ""} <- Integer.parse(year),
+         [h, m, s] <- String.split(time, ":"),
+         {h_n, ""} <- Integer.parse(h),
+         {m_n, ""} <- Integer.parse(m),
+         {s_n, ""} <- Integer.parse(s),
+         {:ok, naive} <- NaiveDateTime.new(year_n, month, day_n, h_n, m_n, s_n) do
+      {:ok, DateTime.from_naive!(naive, "Etc/UTC")}
+    else
+      _ -> :error
     end
   end
 
