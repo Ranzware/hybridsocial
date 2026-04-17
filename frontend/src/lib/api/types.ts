@@ -431,10 +431,11 @@ export interface BannedDomain {
 
 export interface IpBlock {
   id: string;
-  ip: string;
-  severity: 'sign_up_block' | 'sign_up_requires_approval' | 'no_access';
-  comment: string | null;
+  ip_address: string;
+  subnet_mask: string | null;
+  reason: string | null;
   expires_at: string | null;
+  created_by: string | null;
   created_at: string;
 }
 

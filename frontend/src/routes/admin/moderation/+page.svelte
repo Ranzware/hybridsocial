@@ -57,8 +57,8 @@
   let domainsLoaded = $state(false);
   let ipBlocksLoaded = $state(false);
   let newIp = $state('');
-  let newIpSeverity = $state<'sign_up_block' | 'sign_up_requires_approval' | 'no_access'>('sign_up_block');
-  let newIpComment = $state('');
+  let newIpSubnetMask = $state('');
+  let newIpReason = $state('');
 
   const reportColumns = [
     { key: 'category', label: 'Category', sortable: true },
@@ -209,17 +209,19 @@
     if (!newIp.trim()) return;
     try {
       const block = await createIpBlock({
-        ip: newIp,
-        severity: newIpSeverity,
-        comment: newIpComment || null,
+        ip_address: newIp.trim(),
+        subnet_mask: newIpSubnetMask.trim() || null,
+        reason: newIpReason.trim() || null,
         expires_at: null
       });
       ipBlocks = [...ipBlocks, block];
       newIp = '';
-      newIpComment = '';
+      newIpSubnetMask = '';
+      newIpReason = '';
       addToast('IP block created', 'success');
-    } catch {
-      addToast('Failed to create IP block', 'error');
+    } catch (e: any) {
+      const msg = e?.body?.message || e?.body?.error_description || 'Failed to create IP block';
+      addToast(msg, 'error');
     }
   }
 
@@ -374,13 +376,9 @@
 
     {:else if activeTab === 'ipblocks'}
       <form class="add-form" onsubmit={(e) => { e.preventDefault(); handleAddIpBlock(); }}>
-        <input class="input" type="text" bind:value={newIp} placeholder="IP address or CIDR" required />
-        <select class="input" bind:value={newIpSeverity} style="width: 200px">
-          <option value="sign_up_block">Block sign-ups</option>
-          <option value="sign_up_requires_approval">Require approval</option>
-          <option value="no_access">No access</option>
-        </select>
-        <input class="input" type="text" bind:value={newIpComment} placeholder="Comment (optional)" />
+        <input class="input" type="text" bind:value={newIp} placeholder="IP address (IPv4 or IPv6)" required />
+        <input class="input" type="text" bind:value={newIpSubnetMask} placeholder="CIDR (optional, e.g. 24)" style="width: 180px" />
+        <input class="input" type="text" bind:value={newIpReason} placeholder="Reason (optional)" />
         <button class="btn btn-primary" type="submit">Block IP</button>
       </form>
 
@@ -388,12 +386,9 @@
         {#each ipBlocks as block (block.id)}
           <div class="list-item card">
             <div class="list-item-info">
-              <code>{block.ip}</code>
-              <span class="badge-action badge-{block.severity === 'no_access' ? 'reject' : 'warn'}">
-                {block.severity.replace(/_/g, ' ')}
-              </span>
-              {#if block.comment}
-                <span class="text-secondary">- {block.comment}</span>
+              <code>{block.ip_address}{#if block.subnet_mask}/{block.subnet_mask}{/if}</code>
+              {#if block.reason}
+                <span class="text-secondary">- {block.reason}</span>
               {/if}
             </div>
             <button

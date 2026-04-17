@@ -119,15 +119,18 @@ export function unbanDomain(id: string): Promise<void> {
 
 // IP Blocks
 export function getIpBlocks(): Promise<IpBlock[]> {
-  return api.get('/api/v1/admin/ip_blocks');
+  // Backend calls the table "ip_bans"; the frontend keeps the
+  // "ip_blocks"/"IpBlock" vocabulary on the UI since that's what
+  // admins expect to see. Path-level rename only.
+  return api.get<{ data: IpBlock[] }>('/api/v1/admin/ip_bans').then((r) => r.data);
 }
 
-export function createIpBlock(block: Omit<IpBlock, 'id' | 'created_at'>): Promise<IpBlock> {
-  return api.post('/api/v1/admin/ip_blocks', block);
+export function createIpBlock(block: Omit<IpBlock, 'id' | 'created_at' | 'created_by'>): Promise<IpBlock> {
+  return api.post<{ data: IpBlock }>('/api/v1/admin/ip_bans', block).then((r) => r.data);
 }
 
 export function deleteIpBlock(id: string): Promise<void> {
-  return api.delete(`/api/v1/admin/ip_blocks/${id}`);
+  return api.delete(`/api/v1/admin/ip_bans/${id}`);
 }
 
 // Federation
