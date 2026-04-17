@@ -80,7 +80,10 @@
         (u.display_name || '').toLowerCase().includes(search.toLowerCase()) ||
         ((u as any).domain || '').toLowerCase().includes(search.toLowerCase()) ||
         u.email?.toLowerCase().includes(search.toLowerCase());
-      const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'suspended' && u.is_suspended) ||
+        (statusFilter === 'active' && !u.is_suspended);
       const matchesLocation =
         locationFilter === 'all' ||
         (locationFilter === 'local' && (u as any).is_local !== false) ||
@@ -121,8 +124,7 @@
   async function handleSuspend(user: AdminUser) {
     try {
       await suspendUser(user.id);
-      user.status = 'suspended';
-      users = [...users];
+      users = users.map((u) => (u.id === user.id ? { ...u, is_suspended: true } : u));
       addToast(`Suspended @${user.handle}`, 'success');
     } catch {
       addToast('Failed to suspend user', 'error');
@@ -132,8 +134,7 @@
   async function handleUnsuspend(user: AdminUser) {
     try {
       await unsuspendUser(user.id);
-      user.status = 'active';
-      users = [...users];
+      users = users.map((u) => (u.id === user.id ? { ...u, is_suspended: false } : u));
       addToast(`Unsuspended @${user.handle}`, 'success');
     } catch {
       addToast('Failed to unsuspend user', 'error');
@@ -174,19 +175,19 @@
       switch (actionType) {
         case 'silence':
           updated = await silenceUser(actionTarget.id, { reason: actionReason || undefined });
-          updated.silenced = true;
+          updated.is_silenced = true;
           break;
         case 'unsilence':
           updated = await unsilenceUser(actionTarget.id);
-          updated.silenced = false;
+          updated.is_silenced = false;
           break;
         case 'shadow_ban':
           updated = await shadowBanUser(actionTarget.id);
-          updated.shadow_banned = true;
+          updated.is_shadow_banned = true;
           break;
         case 'unshadow_ban':
           updated = await unshadowBanUser(actionTarget.id);
-          updated.shadow_banned = false;
+          updated.is_shadow_banned = false;
           break;
         case 'force_sensitive':
           updated = await forceSensitiveUser(actionTarget.id);
@@ -462,16 +463,15 @@
       <td>{row['email'] || ''}</td>
       <td>{formatDate(row['created_at'] as string)}</td>
       <td>
-        <span class="status-badge {statusClass(row['status'] as string)}">
-          {row['status']}
-        </span>
+        {@const status = row['is_suspended'] ? 'suspended' : 'active'}
+        <span class="status-badge {statusClass(status)}">{status}</span>
       </td>
       <td>
         <div class="flag-badges">
-          {#if row['silenced']}
+          {#if row['is_silenced']}
             <span class="flag-badge flag-silenced">silenced</span>
           {/if}
-          {#if row['shadow_banned']}
+          {#if row['is_shadow_banned']}
             <span class="flag-badge flag-shadow">shadow banned</span>
           {/if}
           {#if row['force_sensitive']}
@@ -484,7 +484,7 @@
       </td>
       <td>
         <div class="action-buttons">
-          {#if row['status'] === 'suspended'}
+          {#if row['is_suspended']}
             <button
               class="btn btn-sm btn-outline"
               type="button"
@@ -514,7 +514,7 @@
                 <button class="dropdown-item" type="button" onclick={() => openWarnModal(row as unknown as AdminUser)}>
                   Warn
                 </button>
-                {#if row['silenced']}
+                {#if row['is_silenced']}
                   <button class="dropdown-item" type="button" onclick={() => openActionModal(row as unknown as AdminUser, 'unsilence')}>
                     Unsilence
                   </button>
@@ -523,7 +523,7 @@
                     Silence
                   </button>
                 {/if}
-                {#if row['shadow_banned']}
+                {#if row['is_shadow_banned']}
                   <button class="dropdown-item" type="button" onclick={() => openActionModal(row as unknown as AdminUser, 'unshadow_ban')}>
                     Unshadow Ban
                   </button>

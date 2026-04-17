@@ -387,9 +387,9 @@ export interface AdminUser {
   is_locked: boolean;
   is_local: boolean;
   domain: string | null;
-  status: 'active' | 'suspended' | 'pending';
-  silenced: boolean;
-  shadow_banned: boolean;
+  is_suspended: boolean;
+  is_silenced: boolean;
+  is_shadow_banned: boolean;
   force_sensitive: boolean;
   trust_level: number;
   post_count: number;
