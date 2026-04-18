@@ -607,9 +607,94 @@ defmodule Hybridsocial.Moderation do
   Attrs should include: item_type, item_id, source, reason, and optionally severity.
   """
   def queue_for_review(attrs) do
-    %QueuedItem{}
-    |> QueuedItem.changeset(attrs)
-    |> Repo.insert()
+    result =
+      %QueuedItem{}
+      |> QueuedItem.changeset(attrs)
+      |> Repo.insert()
+
+    with {:ok, item} <- result do
+      # 1) Realtime push to every open admin panel via SSE.
+      Phoenix.PubSub.broadcast(
+        Hybridsocial.PubSub,
+        "moderation",
+        %{
+          event: "queued",
+          payload: %{
+            id: item.id,
+            item_type: item.item_type,
+            item_id: item.item_id,
+            source: item.source,
+            reason: item.reason,
+            severity: item.severity,
+            status: item.status,
+            inserted_at: item.inserted_at
+          }
+        }
+      )
+
+      # 2) Fire-and-forget email notify (throttled per staff member).
+      Task.Supervisor.start_child(Hybridsocial.TaskSupervisor, fn ->
+        notify_staff_by_email(item)
+      end)
+    end
+
+    result
+  end
+
+  @doc """
+  Emails every staff member who has opted in to the
+  `moderation_queue` notification preference. Throttled to at most
+  one email per recipient per throttle window (default 10 min)
+  via a Valkey key so a filter-rule mistake that flags 500 items
+  in a minute doesn't produce 500 inboxes of 500 emails.
+  """
+  def notify_staff_by_email(%QueuedItem{} = item) do
+    require Logger
+    alias Hybridsocial.{Accounts.Identity, Accounts.User, Auth.RBAC, Notifications, Cache}
+
+    throttle_sec =
+      case Hybridsocial.Config.get("moderation_email_throttle_seconds", 600) do
+        n when is_integer(n) and n > 0 -> n
+        _ -> 600
+      end
+
+    staff_ids =
+      from(r in Hybridsocial.Auth.IdentityRole,
+        distinct: true,
+        select: r.identity_id,
+        where: is_nil(r.expires_at) or r.expires_at > ^DateTime.utc_now()
+      )
+      |> Repo.all()
+
+    for identity_id <- staff_ids do
+      if Notifications.should_notify?(identity_id, "moderation_queue", :email) and
+           RBAC.staff?(identity_id) do
+        throttle_key = "mod_email:#{identity_id}"
+
+        case Cache.get(throttle_key) do
+          nil ->
+            # Set the throttle flag BEFORE dispatching to avoid a
+            # race where two near-simultaneous inserts both race past
+            # the check.
+            Cache.set(throttle_key, "1", throttle_sec)
+
+            with %Identity{} = identity <- Repo.get(Identity, identity_id),
+                 %User{email: email} when is_binary(email) and email != "" <-
+                   Repo.get_by(User, identity_id: identity_id) do
+              try do
+                Hybridsocial.Emails.moderation_queue_email(email, identity, item)
+                |> Hybridsocial.Mailer.deliver()
+              rescue
+                e ->
+                  Logger.warning("moderation email failed for #{identity_id}: #{Exception.message(e)}")
+              end
+            end
+
+          _ ->
+            :ok
+        end
+      end
+    end
   end
 
   @doc """

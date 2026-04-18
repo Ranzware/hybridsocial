@@ -2312,20 +2312,59 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   end
 
   defp serialize_report(report) do
+    # The admin page renders report.reporter / report.target_account /
+    # report.target_post — so embed each, not just bare IDs. Reporter
+    # and reported are already preloaded by Moderation.list_reports/1;
+    # we only have to resolve the target post here.
+    reporter =
+      case report.reporter do
+        %Hybridsocial.Accounts.Identity{} = i -> serialize_account(i)
+        _ -> nil
+      end
+
+    target_account =
+      case report.reported do
+        %Hybridsocial.Accounts.Identity{} = i -> serialize_account(i)
+        _ -> nil
+      end
+
+    target_post =
+      if report.target_type == "post" and is_binary(report.target_id) do
+        case Hybridsocial.Repo.get(Hybridsocial.Social.Post, report.target_id) do
+          nil ->
+            nil
+
+          post ->
+            %{
+              id: post.id,
+              content: post.content,
+              content_html: post.content_html,
+              created_at: post.inserted_at,
+              visibility: post.visibility,
+              deleted_at: post.deleted_at
+            }
+        end
+      end
+
     %{
       id: report.id,
       reporter_id: report.reporter_id,
       reported_id: report.reported_id,
+      reporter: reporter,
+      target_account: target_account,
+      target_post: target_post,
       target_type: report.target_type,
       target_id: report.target_id,
       category: report.category,
       description: report.description,
+      comment: report.description,
       status: report.status,
       assigned_to: report.assigned_to,
       action_taken: report.action_taken,
       federated: report.federated,
       resolved_at: report.resolved_at,
-      created_at: report.inserted_at
+      created_at: report.inserted_at,
+      updated_at: report.updated_at
     }
   end
 

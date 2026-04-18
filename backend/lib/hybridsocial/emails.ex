@@ -64,6 +64,41 @@ defmodule Hybridsocial.Emails do
   end
 
   @doc """
+  Alerts a staff member that a new item landed in the moderation
+  queue. Throttled per-recipient by the caller, so this only has to
+  render a compact message.
+  """
+  def moderation_queue_email(to_email, _staff_identity, item) do
+    instance_name = Hybridsocial.Config.get("instance_name", "HybridSocial")
+    from_address = from_address()
+
+    subject =
+      "#{instance_name} — moderation queue: new #{item.severity || "medium"}-severity #{item.item_type}"
+
+    body = """
+    A new item was flagged for moderator review on #{instance_name}.
+
+    Type:     #{item.item_type}
+    Severity: #{item.severity || "medium"}
+    Source:   #{item.source}
+    Reason:   #{item.reason}
+
+    Review it here:
+    #{base_url()}/admin/moderation-queue
+
+    You're receiving this because you enabled email notifications for
+    the "moderation_queue" notification type. To stop, turn it off
+    in your account's notification preferences.
+    """
+
+    new()
+    |> to(to_email)
+    |> from(from_address)
+    |> subject(subject)
+    |> text_body(body)
+  end
+
+  @doc """
   Builds a login notification email alerting the user of a new login.
   """
   def login_notification_email(user, ip, user_agent) do
