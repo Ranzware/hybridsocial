@@ -747,7 +747,7 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
       case Announcement.create(attrs) do
         {:ok, ann} ->
           Moderation.log(admin_id, "announcement.created", "announcement", ann.id, %{
-            title: ann.title
+            content: String.slice(ann.content || "", 0, 80)
           })
 
           conn |> put_status(:created) |> json(serialize_announcement(ann))
@@ -769,7 +769,7 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
       case Announcement.update(id, params) do
         {:ok, ann} ->
           Moderation.log(admin_id, "announcement.updated", "announcement", ann.id, %{
-            title: ann.title
+            content: String.slice(ann.content || "", 0, 80)
           })
 
           json(conn, serialize_announcement(ann))
@@ -2473,13 +2473,23 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   end
 
   defp serialize_audit_entry(entry) do
+    # Wrap target resolution so a broken resolver clause can never
+    # 500 the whole audit log — the page is near-useless if it fails
+    # entirely, so degrade to the raw id/type instead.
+    target =
+      try do
+        resolve_audit_target(entry.target_type, entry.target_id)
+      rescue
+        _ -> nil
+      end
+
     %{
       id: entry.id,
       actor: serialize_audit_actor(entry.actor),
       action: entry.action,
       target_type: entry.target_type,
       target_id: entry.target_id,
-      target: resolve_audit_target(entry.target_type, entry.target_id),
+      target: target,
       details: entry.details,
       ip_address: entry.ip_address,
       created_at: entry.created_at
@@ -2571,7 +2581,7 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   end
 
   defp resolve_audit_target("invite", id) do
-    case Hybridsocial.Repo.get(Hybridsocial.Accounts.InviteCode, id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Accounts.Invite, id) do
       nil -> %{label: "invite (deleted)", deleted: true}
       invite -> %{label: "invite: #{invite.code}", code: invite.code}
     end
@@ -2634,8 +2644,12 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
   defp resolve_audit_target("announcement", id) do
     case Hybridsocial.Repo.get(Hybridsocial.Admin.Announcement, id) do
-      nil -> %{label: "announcement (deleted)", deleted: true}
-      a -> %{label: "announcement", title: a.title}
+      nil ->
+        %{label: "announcement (deleted)", deleted: true}
+
+      a ->
+        excerpt = (a.content || "") |> String.slice(0, 60) |> String.replace(~r/\s+/, " ")
+        %{label: "announcement: #{excerpt}", excerpt: excerpt}
     end
   end
 
