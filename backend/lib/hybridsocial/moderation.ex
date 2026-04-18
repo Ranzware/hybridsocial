@@ -489,6 +489,24 @@ defmodule Hybridsocial.Moderation do
   defp filter_appeals_by_identity(query, nil), do: query
   defp filter_appeals_by_identity(query, id), do: where(query, [a], a.identity_id == ^id)
 
+  @doc """
+  Hard-deletes approved + rejected appeals whose `reviewed_at` is
+  older than `retention_days` days. Pending appeals are never
+  pruned — they still need admin action. Returns the row count.
+  """
+  def prune_closed_appeals(retention_days) when is_integer(retention_days) and retention_days > 0 do
+    cutoff = DateTime.add(DateTime.utc_now(), -retention_days * 86_400, :second)
+
+    {n, _} =
+      Appeal
+      |> where([a], a.status in ["approved", "rejected"])
+      |> where([a], not is_nil(a.reviewed_at))
+      |> where([a], a.reviewed_at < ^cutoff)
+      |> Repo.delete_all()
+
+    n
+  end
+
   def approve_appeal(appeal_id, admin_id, response \\ nil) do
     case get_appeal(appeal_id) do
       nil ->

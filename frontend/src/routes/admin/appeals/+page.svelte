@@ -85,6 +85,9 @@
 
 <div class="appeals-page">
   <h1 class="page-title">Appeals</h1>
+  <p class="page-retention-note">
+    Approved and rejected appeals are kept for 90 days, then deleted. Pending appeals are never deleted automatically.
+  </p>
 
   <div class="tabs-list" role="tablist">
     {#each statusTabs as tab (tab.id)}
@@ -191,7 +194,15 @@
   .page-title {
     font-size: var(--text-2xl);
     font-weight: 700;
-    margin-block-end: var(--space-6);
+    margin-block-end: var(--space-2);
+  }
+
+  .page-retention-note {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    margin-block-end: var(--space-5);
+    max-width: 540px;
+    line-height: 1.4;
   }
 
   .tabs-list {

@@ -47,7 +47,9 @@ defmodule Hybridsocial.Application do
             # Prunes encrypted backups older than backup_retention_days (default 30)
             Hybridsocial.Admin.BackupExpiryWorker,
             # Prunes resolved/dismissed reports older than report_retention_days (default 90)
-            Hybridsocial.Moderation.ReportExpiryWorker
+            Hybridsocial.Moderation.ReportExpiryWorker,
+            # Prunes approved/rejected appeals older than appeal_retention_days (default 90)
+            Hybridsocial.Moderation.AppealExpiryWorker
           ],
           else: []
         ) ++
