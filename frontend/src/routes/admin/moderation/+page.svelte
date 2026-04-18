@@ -617,6 +617,16 @@
 
   .report-content-cell {
     max-width: 360px;
+    padding-inline-start: var(--space-4) !important;
+  }
+
+  /* Widen the handle cells + keep the whole handle on one line so a
+     long acct like @user@bassam.social can't collide with the next
+     column's content. */
+  :global(.data-table td:nth-child(2)),
+  :global(.data-table td:nth-child(3)) {
+    min-width: 140px;
+    padding-inline-end: var(--space-6) !important;
   }
 
   .report-comment {
@@ -700,6 +710,13 @@
   .report-account-link {
     color: var(--color-primary);
     text-decoration: none;
+    /* Never split a handle across a column boundary — keeps
+       @long@domain.social from running into the next cell. */
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: keep-all;
+    display: inline-block;
+    max-width: 100%;
   }
 
   .report-account-link:hover {
