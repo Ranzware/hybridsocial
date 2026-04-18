@@ -7,15 +7,22 @@
     getReports, resolveReport, dismissReport,
     getContentFilters, createContentFilter, deleteContentFilter,
     getBannedDomains, banDomain, unbanDomain,
-    getIpBlocks, createIpBlock, deleteIpBlock
+    getIpBlocks, createIpBlock, deleteIpBlock,
+    getEmailDomainBans, createEmailDomainBan, deleteEmailDomainBan,
+    getMediaHashBans, createMediaHashBan, deleteMediaHashBan,
   } from '$lib/api/admin.js';
-  import type { AdminReport, ContentFilter, BannedDomain, IpBlock } from '$lib/api/types.js';
+  import type {
+    AdminReport, ContentFilter, BannedDomain, IpBlock,
+    EmailDomainBan, MediaHashBan,
+  } from '$lib/api/types.js';
 
   const tabs = [
     { id: 'reports', label: 'Reports' },
     { id: 'filters', label: 'Content Filters' },
     { id: 'domains', label: 'Banned Domains' },
-    { id: 'ipblocks', label: 'IP Blocks' }
+    { id: 'ipblocks', label: 'IP Blocks' },
+    { id: 'email-domains', label: 'Email Domains' },
+    { id: 'media-hashes', label: 'Media Hashes' },
   ];
 
   let activeTab = $state('reports');
@@ -59,6 +66,22 @@
   let newIp = $state('');
   let newIpSubnetMask = $state('');
   let newIpReason = $state('');
+
+  // Email-domain bans state (reject registration from these domains).
+  let emailBans: EmailDomainBan[] = $state([]);
+  let emailBansLoading = $state(false);
+  let emailBansLoaded = $state(false);
+  let newEmailDomain = $state('');
+  let newEmailReason = $state('');
+
+  // Media-hash bans state (reject uploads / federated attachments
+  // matching these known-bad hashes).
+  let mediaHashBans: MediaHashBan[] = $state([]);
+  let mediaHashBansLoading = $state(false);
+  let mediaHashBansLoaded = $state(false);
+  let newHash = $state('');
+  let newHashType = $state<'md5' | 'sha256' | 'phash'>('sha256');
+  let newHashDescription = $state('');
 
   const reportColumns = [
     { key: 'category', label: 'Category', sortable: true },
@@ -131,6 +154,30 @@
     }
   }
 
+  async function loadEmailBans() {
+    emailBansLoading = true;
+    try {
+      emailBans = await getEmailDomainBans();
+    } catch {
+      addToast('Failed to load email domain bans', 'error');
+    } finally {
+      emailBansLoading = false;
+      emailBansLoaded = true;
+    }
+  }
+
+  async function loadMediaHashBans() {
+    mediaHashBansLoading = true;
+    try {
+      mediaHashBans = await getMediaHashBans();
+    } catch {
+      addToast('Failed to load media hash bans', 'error');
+    } finally {
+      mediaHashBansLoading = false;
+      mediaHashBansLoaded = true;
+    }
+  }
+
   $effect(() => {
     if (activeTab === 'filters' && !filtersLoaded && !filtersLoading) {
       loadFilters();
@@ -138,8 +185,67 @@
       loadDomains();
     } else if (activeTab === 'ipblocks' && !ipBlocksLoaded && !ipBlocksLoading) {
       loadIpBlocks();
+    } else if (activeTab === 'email-domains' && !emailBansLoaded && !emailBansLoading) {
+      loadEmailBans();
+    } else if (activeTab === 'media-hashes' && !mediaHashBansLoaded && !mediaHashBansLoading) {
+      loadMediaHashBans();
     }
   });
+
+  async function handleAddEmailBan() {
+    if (!newEmailDomain.trim()) return;
+    try {
+      const ban = await createEmailDomainBan(newEmailDomain.trim(), newEmailReason.trim() || undefined);
+      emailBans = [...emailBans, ban];
+      newEmailDomain = '';
+      newEmailReason = '';
+      addToast('Email domain blocked', 'success');
+    } catch {
+      addToast('Failed to block email domain', 'error');
+    }
+  }
+
+  async function handleRemoveEmailBan(id: string) {
+    try {
+      await deleteEmailDomainBan(id);
+      emailBans = emailBans.filter((b) => b.id !== id);
+      addToast('Email domain unblocked', 'success');
+    } catch {
+      addToast('Failed to unblock email domain', 'error');
+    }
+  }
+
+  async function handleAddMediaHashBan() {
+    if (!newHash.trim()) return;
+    try {
+      const ban = await createMediaHashBan({
+        hash: newHash.trim(),
+        hash_type: newHashType,
+        description: newHashDescription.trim() || undefined,
+      });
+      mediaHashBans = [...mediaHashBans, ban];
+      newHash = '';
+      newHashDescription = '';
+      addToast('Media hash banned', 'success');
+    } catch {
+      addToast('Failed to ban media hash', 'error');
+    }
+  }
+
+  async function handleRemoveMediaHashBan(id: string) {
+    try {
+      await deleteMediaHashBan(id);
+      mediaHashBans = mediaHashBans.filter((b) => b.id !== id);
+      addToast('Media hash ban removed', 'success');
+    } catch {
+      addToast('Failed to remove media hash ban', 'error');
+    }
+  }
+
+  function truncateHash(hash: string): string {
+    if (hash.length <= 16) return hash;
+    return hash.slice(0, 8) + '…' + hash.slice(-8);
+  }
 
   async function handleResolve(report: AdminReport) {
     try {
@@ -488,6 +594,72 @@
           <p class="empty-text">No IP blocks</p>
         {/each}
       </div>
+
+    {:else if activeTab === 'email-domains'}
+      <form class="add-form" onsubmit={(e) => { e.preventDefault(); handleAddEmailBan(); }}>
+        <input class="input" type="text" bind:value={newEmailDomain} placeholder="domain.example" required />
+        <input class="input" type="text" bind:value={newEmailReason} placeholder="Reason (optional)" />
+        <button class="btn btn-primary" type="submit">Block domain</button>
+      </form>
+
+      {#if emailBansLoading}
+        <div class="skeleton" style="height: 50px"></div>
+      {:else}
+        <div class="list-items">
+          {#each emailBans as ban (ban.id)}
+            <div class="list-item card">
+              <div class="list-item-info">
+                <strong>{ban.domain}</strong>
+                {#if ban.reason}
+                  <span class="text-secondary">— {ban.reason}</span>
+                {/if}
+                <span class="text-tertiary" style="font-size: var(--text-xs)">Added {formatDate(ban.created_at)}</span>
+              </div>
+              <button class="btn btn-sm btn-danger" type="button" onclick={() => handleRemoveEmailBan(ban.id)}>
+                Remove
+              </button>
+            </div>
+          {:else}
+            <p class="empty-text">No blocked email domains</p>
+          {/each}
+        </div>
+      {/if}
+
+    {:else if activeTab === 'media-hashes'}
+      <form class="add-form" onsubmit={(e) => { e.preventDefault(); handleAddMediaHashBan(); }}>
+        <input class="input" type="text" bind:value={newHash} placeholder="Hash value…" required />
+        <select class="input" bind:value={newHashType} style="width: 120px">
+          <option value="sha256">SHA-256</option>
+          <option value="md5">MD5</option>
+          <option value="phash">pHash</option>
+        </select>
+        <input class="input" type="text" bind:value={newHashDescription} placeholder="Description (optional)" />
+        <button class="btn btn-primary" type="submit">Ban hash</button>
+      </form>
+
+      {#if mediaHashBansLoading}
+        <div class="skeleton" style="height: 50px"></div>
+      {:else}
+        <div class="list-items">
+          {#each mediaHashBans as ban (ban.id)}
+            <div class="list-item card">
+              <div class="list-item-info">
+                <code class="hash-value" title={ban.hash}>{truncateHash(ban.hash)}</code>
+                <span class="badge-type">{ban.hash_type}</span>
+                {#if ban.description}
+                  <span class="text-secondary">— {ban.description}</span>
+                {/if}
+                <span class="text-tertiary" style="font-size: var(--text-xs)">Added {formatDate(ban.created_at)}</span>
+              </div>
+              <button class="btn btn-sm btn-danger" type="button" onclick={() => handleRemoveMediaHashBan(ban.id)}>
+                Remove
+              </button>
+            </div>
+          {:else}
+            <p class="empty-text">No media hash bans</p>
+          {/each}
+        </div>
+      {/if}
     {/if}
   </Tabs>
 </div>
@@ -732,6 +904,25 @@
     color: var(--color-text-tertiary);
     line-height: 1.4;
     max-width: 480px;
+  }
+
+  .hash-value {
+    font-size: var(--text-sm);
+    background: var(--color-surface);
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-sm);
+    cursor: help;
+    font-family: var(--font-mono, monospace);
+  }
+
+  .badge-type {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-full);
+    background: var(--color-info-soft);
+    color: #1e40af;
+    text-transform: uppercase;
   }
 
   .report-account-link {
