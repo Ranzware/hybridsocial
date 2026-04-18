@@ -8,7 +8,11 @@ defmodule Hybridsocial.Moderation.AuditLog do
   schema "audit_log" do
     field :action, :string
     field :target_type, :string
-    field :target_id, :binary_id
+    # `:string` rather than `:binary_id` because callers legitimately
+    # pass non-UUID identifiers here — setting keys, instance-policy
+    # domains, invite codes. UUID targets (identity, post, report,
+    # …) still round-trip cleanly as their canonical string form.
+    field :target_id, :string
     field :details, :map, default: %{}
     field :ip_address, :string
     field :created_at, :utc_datetime_usec
