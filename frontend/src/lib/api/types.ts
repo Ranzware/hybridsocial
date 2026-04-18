@@ -613,10 +613,15 @@ export interface AdminDashboardStats {
 export interface Backup {
   id: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed';
-  size: number | null;
+  size?: number | null;
+  file_size?: number | null;
+  file_path?: string | null;
   created_at: string;
   completed_at: string | null;
-  download_url: string | null;
+  started_at?: string | null;
+  type?: string;
+  initiated_by?: string | null;
+  download_url?: string | null;
 }
 
 export interface AuditLogEntry {

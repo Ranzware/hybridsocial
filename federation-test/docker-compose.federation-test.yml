@@ -106,6 +106,11 @@ services:
       MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:-}
     volumes:
       - hs_uploads:/app/uploads
+      # pg_dump output from the admin backup feature. Keeping this
+      # on a named volume so backup files survive `docker compose
+      # up --build hs_backend` (which otherwise reruns a fresh
+      # container with an empty priv/backups/ dir).
+      - hs_backups:/app/priv/backups
     networks:
       - federation
 
@@ -242,6 +247,7 @@ volumes:
   hs_valkeydata:
   hs_natsdata:
   hs_uploads:
+  hs_backups:
   mastodon_pgdata:
   mastodon_redisdata:
   mastodon_public_system:

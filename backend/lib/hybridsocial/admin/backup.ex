@@ -172,8 +172,39 @@ defmodule Hybridsocial.Admin.Backup do
   end
 
   @doc """
-  Decrypts and verifies a backup file. Does NOT actually restore the database.
-  This is a stub that validates the passphrase can decrypt the backup.
+  Reads the raw encrypted bytes of a completed backup. Returns
+  `{:ok, binary, filename}` or `{:error, reason}`. The binary is
+  whatever was written to disk — iv + tag + ciphertext — and is
+  only useful once the admin decrypts it with the matching
+  passphrase on their own machine.
+  """
+  # sobelow_skip ["Traversal.FileModule"]
+  def read_backup_file(backup_id) do
+    case get_backup(backup_id) do
+      nil ->
+        {:error, :not_found}
+
+      %BackupJob{file_path: nil} ->
+        {:error, :no_file}
+
+      %BackupJob{file_path: file_path, id: id} ->
+        case File.read(file_path) do
+          {:ok, bin} -> {:ok, bin, "hybridsocial-backup-#{id}.enc"}
+          {:error, reason} -> {:error, {:file_read_error, reason}}
+        end
+    end
+  end
+
+  @doc """
+  Decrypts a backup and pipes it into `pg_restore --clean --if-exists`
+  against the live Repo. DESTRUCTIVE. Drops all tables that the dump
+  knows about and recreates them with the backup's data.
+
+  Returns `{:ok, :restored}` on success, or an error tuple on any
+  failure (bad passphrase, missing file, pg_restore failure, etc.).
+  The caller is responsible for warning the admin and gating on a
+  typed confirmation — this function does not second-guess the
+  request.
   """
   # sobelow_skip ["Traversal.FileModule"]
   def restore_backup(backup_id, passphrase) do
@@ -184,25 +215,65 @@ defmodule Hybridsocial.Admin.Backup do
       %BackupJob{file_path: nil} ->
         {:error, :no_file}
 
-      %BackupJob{file_path: file_path, encryption_key_hash: stored_hash} ->
-        # Verify passphrase matches
-        if hash_passphrase(passphrase) != stored_hash do
-          {:error, :invalid_passphrase}
-        else
-          case File.read(file_path) do
-            {:ok, encrypted} ->
-              case decrypt_backup(encrypted, passphrase) do
-                {:ok, _decompressed} ->
-                  {:ok, :verified}
-
-                {:error, reason} ->
-                  {:error, reason}
-              end
-
-            {:error, reason} ->
-              {:error, {:file_read_error, reason}}
-          end
+      %BackupJob{file_path: file_path, encryption_key_hash: stored_hash} = job ->
+        with :ok <- verify_passphrase(stored_hash, passphrase),
+             {:ok, encrypted} <- wrap_read(File.read(file_path)),
+             {:ok, dump} <- decrypt_backup(encrypted, passphrase),
+             :ok <- run_pg_restore(dump) do
+          Logger.warning("Database restored from backup #{job.id}")
+          {:ok, :restored}
         end
+    end
+  end
+
+  defp verify_passphrase(stored_hash, passphrase) do
+    if hash_passphrase(passphrase) == stored_hash, do: :ok, else: {:error, :invalid_passphrase}
+  end
+
+  defp wrap_read({:ok, bin}), do: {:ok, bin}
+  defp wrap_read({:error, reason}), do: {:error, {:file_read_error, reason}}
+
+  # Streams the decrypted pg_dump -Fc payload into pg_restore via a
+  # tmp file (pg_restore insists on a seekable input). --clean drops
+  # existing objects, --if-exists avoids errors on drops that would
+  # fail for missing rows, --no-owner/--no-privileges sidestep owner
+  # mismatches between the dump and the current Postgres user.
+  defp run_pg_restore(dump) do
+    config = Repo.config()
+    hostname = Keyword.get(config, :hostname, "localhost")
+    port = Keyword.get(config, :port, 5432)
+    username = Keyword.get(config, :username, "postgres")
+    password = Keyword.get(config, :password, "")
+    db_name = Keyword.fetch!(config, :database)
+
+    tmp = Path.join(System.tmp_dir!(), "restore_#{System.unique_integer([:positive])}.dump")
+    File.write!(tmp, dump)
+
+    args = [
+      "-h",
+      to_string(hostname),
+      "-p",
+      to_string(port),
+      "-U",
+      to_string(username),
+      "-d",
+      db_name,
+      "--clean",
+      "--if-exists",
+      "--no-owner",
+      "--no-privileges",
+      tmp
+    ]
+
+    env = [{"PGPASSWORD", to_string(password)}]
+
+    try do
+      case System.cmd("pg_restore", args, env: env, stderr_to_stdout: true) do
+        {_output, 0} -> :ok
+        {output, exit_code} -> {:error, {:pg_restore_failed, exit_code, String.slice(output, 0, 1000)}}
+      end
+    after
+      File.rm(tmp)
     end
   end
 

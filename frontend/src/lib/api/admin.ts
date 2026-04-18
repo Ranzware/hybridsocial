@@ -201,6 +201,18 @@ export function createBackup(passphrase?: string): Promise<Backup> {
   return api.post<any>('/api/v1/admin/backup', { passphrase }).then(r => r.data || r);
 }
 
+// Backup files are binary — the api client helper always does JSON,
+// so just return the endpoint URL and let the browser handle the
+// download with credentials on the same origin.
+export function backupDownloadUrl(id: string): string {
+  const base = import.meta.env.VITE_API_URL || '';
+  return `${base}/api/v1/admin/backups/${id}/download`;
+}
+
+export function restoreBackup(id: string, passphrase: string, confirmation: string): Promise<{ status: string; message: string }> {
+  return api.post(`/api/v1/admin/backups/${id}/restore`, { passphrase, confirmation });
+}
+
 // Audit Log
 export function getAuditLog(params?: Record<string, string>): Promise<PaginatedResponse<AuditLogEntry>> {
   return api.get('/api/v1/admin/audit_log', params);
