@@ -861,7 +861,7 @@
             onkeydown={handleMentionKeydown}
             onpaste={handlePaste}
             class="composer-textarea"
-            placeholder="What's on your mind?"
+            placeholder={replyTo ? `Reply to @${replyTo.account?.handle ?? replyTo.account?.acct ?? ''}…` : quotePost ? 'Add a comment…' : "What's on your mind?"}
             aria-label="Post content"
             rows={3}
           ></textarea>
@@ -1740,6 +1740,8 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
     padding-block-start: 16px;
     margin-block-start: 8px;
     border-block-start: 1px solid var(--color-border);
@@ -1811,7 +1813,9 @@
   .composer-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .composer-char-count {
@@ -1838,6 +1842,7 @@
     font-weight: 700;
     cursor: pointer;
     transition: background-color 150ms ease;
+    white-space: nowrap;
   }
 
   .composer-submit:hover:not(:disabled) {
@@ -1861,6 +1866,7 @@
     font-weight: 600;
     cursor: pointer;
     transition: background-color 150ms ease;
+    white-space: nowrap;
   }
 
   .composer-save-draft:hover:not(:disabled) {
