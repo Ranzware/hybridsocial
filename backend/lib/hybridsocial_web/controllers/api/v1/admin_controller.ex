@@ -741,10 +741,15 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
   def create_announcement(conn, params) do
     with :ok <- require_permission(conn, "settings.manage") do
-      attrs = Map.put(params, "created_by", conn.assigns.current_identity.id)
+      admin_id = conn.assigns.current_identity.id
+      attrs = Map.put(params, "created_by", admin_id)
 
       case Announcement.create(attrs) do
         {:ok, ann} ->
+          Moderation.log(admin_id, "announcement.created", "announcement", ann.id, %{
+            title: ann.title
+          })
+
           conn |> put_status(:created) |> json(serialize_announcement(ann))
 
         {:error, changeset} ->
@@ -759,8 +764,14 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
   def update_announcement(conn, %{"id" => id} = params) do
     with :ok <- require_permission(conn, "settings.manage") do
+      admin_id = conn.assigns.current_identity.id
+
       case Announcement.update(id, params) do
         {:ok, ann} ->
+          Moderation.log(admin_id, "announcement.updated", "announcement", ann.id, %{
+            title: ann.title
+          })
+
           json(conn, serialize_announcement(ann))
 
         {:error, :not_found} ->
@@ -778,8 +789,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
   def delete_announcement(conn, %{"id" => id}) do
     with :ok <- require_permission(conn, "settings.manage") do
+      admin_id = conn.assigns.current_identity.id
+
       case Announcement.delete(id) do
         {:ok, _} ->
+          Moderation.log(admin_id, "announcement.deleted", "announcement", id, %{})
           json(conn, %{status: "ok"})
 
         {:error, :not_found} ->
@@ -843,6 +857,10 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
       case Moderation.resolve_report(id, moderator_id, action_taken) do
         {:ok, report} ->
+          Moderation.log(moderator_id, "report.resolved", "report", report.id, %{
+            action_taken: action_taken
+          })
+
           Moderation.fire_webhook("report.resolved", %{
             id: report.id,
             moderator_id: moderator_id,
@@ -868,6 +886,8 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
       case Moderation.dismiss_report(id, moderator_id) do
         {:ok, report} ->
+          Moderation.log(moderator_id, "report.dismissed", "report", report.id, %{})
+
           Moderation.fire_webhook("report.resolved", %{
             id: report.id,
             moderator_id: moderator_id,
@@ -889,10 +909,15 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
   def assign_report(conn, %{"id" => id} = params) do
     with :ok <- require_permission(conn, "reports.assign") do
-      moderator_id = params["moderator_id"] || conn.assigns.current_identity.id
+      admin_id = conn.assigns.current_identity.id
+      moderator_id = params["moderator_id"] || admin_id
 
       case Moderation.assign_report(id, moderator_id) do
         {:ok, report} ->
+          Moderation.log(admin_id, "report.assigned", "report", report.id, %{
+            moderator_id: moderator_id
+          })
+
           conn |> put_status(:ok) |> json(%{data: serialize_report(report)})
 
         {:error, :not_found} ->
@@ -1770,6 +1795,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
       case Moderation.approve_appeal(id, admin_id, response) do
         {:ok, appeal} ->
+          Moderation.log(admin_id, "appeal.approved", "appeal", appeal.id, %{
+            action_type: appeal.action_type,
+            response: response
+          })
+
           conn |> put_status(:ok) |> json(%{data: serialize_appeal(appeal)})
 
         {:error, :not_found} ->
@@ -1793,6 +1823,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
 
       case Moderation.reject_appeal(id, admin_id, response) do
         {:ok, appeal} ->
+          Moderation.log(admin_id, "appeal.rejected", "appeal", appeal.id, %{
+            action_type: appeal.action_type,
+            response: response
+          })
+
           conn |> put_status(:ok) |> json(%{data: serialize_appeal(appeal)})
 
         {:error, :not_found} ->
@@ -2440,14 +2475,178 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   defp serialize_audit_entry(entry) do
     %{
       id: entry.id,
-      actor_id: entry.actor_id,
+      actor: serialize_audit_actor(entry.actor),
       action: entry.action,
       target_type: entry.target_type,
       target_id: entry.target_id,
+      target: resolve_audit_target(entry.target_type, entry.target_id),
       details: entry.details,
       ip_address: entry.ip_address,
       created_at: entry.created_at
     }
+  end
+
+  # Actor is nil for pre-auth events (auth.login_failed, auth.register)
+  # and for actions fired by the system. Emit an explicit shape in both
+  # cases so the frontend can render "system" without guessing.
+  defp serialize_audit_actor(nil), do: nil
+
+  defp serialize_audit_actor(%Hybridsocial.Accounts.Identity{} = actor) do
+    %{
+      id: actor.id,
+      handle: actor.handle,
+      display_name: actor.display_name,
+      avatar_url: actor.avatar_url
+    }
+  end
+
+  # Turns `(target_type, target_id)` into a small struct the UI can
+  # show verbatim — e.g. `report #5995f424` becomes
+  # `{label: "report from @alice against @bob", category: "spam"}`.
+  # Each clause deliberately does at most one indexed lookup so the
+  # audit-log list doesn't N+1 on large pages.
+  defp resolve_audit_target(_type, nil), do: nil
+
+  defp resolve_audit_target("identity", id) do
+    case Accounts.get_identity(id) do
+      nil -> %{label: "identity (deleted)", deleted: true}
+      %{handle: h, display_name: d} -> %{label: "@#{h}", handle: h, display_name: d}
+    end
+  end
+
+  defp resolve_audit_target("post", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Social.Post, id) do
+      nil ->
+        %{label: "post (deleted)", deleted: true}
+
+      %{content: content, identity_id: author_id} ->
+        excerpt =
+          (content || "") |> String.slice(0, 80) |> String.replace(~r/\s+/, " ")
+
+        author = author_id && Accounts.get_identity(author_id)
+        handle = author && author.handle
+        %{label: "post by @#{handle || "?"}", excerpt: excerpt, author_handle: handle}
+    end
+  end
+
+  defp resolve_audit_target("report", id) do
+    case Moderation.get_report(id) do
+      nil ->
+        %{label: "report (deleted)", deleted: true}
+
+      report ->
+        reporter_handle = report.reporter && report.reporter.handle
+        reported_handle = report.reported && report.reported.handle
+
+        %{
+          label: "report: @#{reporter_handle || "?"} → @#{reported_handle || "?"}",
+          reporter_handle: reporter_handle,
+          reported_handle: reported_handle,
+          category: report.category,
+          status: report.status
+        }
+    end
+  end
+
+  defp resolve_audit_target("setting", key) do
+    %{label: "setting: #{key}", key: key}
+  end
+
+  defp resolve_audit_target("instance_policy", domain) do
+    %{label: "instance: #{domain}", domain: domain}
+  end
+
+  defp resolve_audit_target("relay", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Federation.Relay, id) do
+      nil -> %{label: "relay (deleted)", deleted: true}
+      relay -> %{label: "relay: #{relay.inbox_url}", inbox_url: relay.inbox_url}
+    end
+  end
+
+  defp resolve_audit_target("webhook", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Moderation.Webhook, id) do
+      nil -> %{label: "webhook (deleted)", deleted: true}
+      hook -> %{label: "webhook: #{hook.url}", url: hook.url}
+    end
+  end
+
+  defp resolve_audit_target("invite", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Accounts.InviteCode, id) do
+      nil -> %{label: "invite (deleted)", deleted: true}
+      invite -> %{label: "invite: #{invite.code}", code: invite.code}
+    end
+  end
+
+  defp resolve_audit_target("content_filter", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Moderation.ContentFilter, id) do
+      nil -> %{label: "filter (deleted)", deleted: true}
+      f -> %{label: "filter: #{f.pattern}", pattern: f.pattern, action: f.action}
+    end
+  end
+
+  defp resolve_audit_target("ip_ban", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Moderation.IpBan, id) do
+      nil -> %{label: "ip_ban (deleted)", deleted: true}
+      b -> %{label: "ip: #{b.ip_address}", ip_address: b.ip_address, reason: b.reason}
+    end
+  end
+
+  defp resolve_audit_target("email_domain_ban", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Moderation.EmailDomainBan, id) do
+      nil -> %{label: "email domain (deleted)", deleted: true}
+      b -> %{label: "email domain: #{b.domain}", domain: b.domain, reason: b.reason}
+    end
+  end
+
+  defp resolve_audit_target("media_hash_ban", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Moderation.MediaHashBan, id) do
+      nil -> %{label: "media hash (deleted)", deleted: true}
+      b -> %{label: "hash: #{String.slice(b.hash || "", 0, 12)}…", hash: b.hash, reason: b.reason}
+    end
+  end
+
+  defp resolve_audit_target("moderation_note", _id) do
+    # The note itself is a free-text admin comment attached to an
+    # identity; no useful standalone label. Surface action + details.
+    %{label: "moderation note"}
+  end
+
+  defp resolve_audit_target("queued_item", _id) do
+    %{label: "queue item"}
+  end
+
+  defp resolve_audit_target("appeal", id) do
+    case Moderation.get_appeal(id) do
+      nil ->
+        %{label: "appeal (deleted)", deleted: true}
+
+      appeal ->
+        identity_handle = appeal.identity && appeal.identity.handle
+
+        %{
+          label: "appeal by @#{identity_handle || "?"}",
+          identity_handle: identity_handle,
+          action_type: appeal.action_type,
+          status: appeal.status
+        }
+    end
+  end
+
+  defp resolve_audit_target("announcement", id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Admin.Announcement, id) do
+      nil -> %{label: "announcement (deleted)", deleted: true}
+      a -> %{label: "announcement", title: a.title}
+    end
+  end
+
+  defp resolve_audit_target("backup", id) do
+    %{label: "backup: #{id}"}
+  end
+
+  # Unknown target type — fall back to the raw id so we at least show
+  # something, not "#5995f424". Logs an info so we can add a clause.
+  defp resolve_audit_target(type, id) when is_binary(type) do
+    %{label: "#{type}: #{id}"}
   end
 
   defp serialize_account(identity) do

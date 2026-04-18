@@ -628,13 +628,52 @@ export interface Backup {
   download_url?: string | null;
 }
 
+export interface AuditActor {
+  id: string;
+  handle: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+// Backend-resolved, per-target_type view of the audited object.
+// `label` is always present and safe to render verbatim; the extra
+// fields (handle, excerpt, domain, code, …) are optional depending on
+// target_type and are used for the detail modal.
+export interface AuditTarget {
+  label: string;
+  deleted?: boolean;
+  handle?: string;
+  display_name?: string | null;
+  excerpt?: string;
+  author_handle?: string;
+  reporter_handle?: string;
+  reported_handle?: string;
+  category?: string;
+  status?: string;
+  key?: string;
+  domain?: string;
+  inbox_url?: string;
+  url?: string;
+  code?: string;
+  pattern?: string;
+  action?: string;
+  ip_address?: string;
+  reason?: string;
+  hash?: string;
+  title?: string;
+  action_type?: string;
+  identity_handle?: string;
+}
+
 export interface AuditLogEntry {
   id: string;
-  actor: Identity;
+  actor: AuditActor | null;
   action: string;
   target_type: string | null;
   target_id: string | null;
+  target: AuditTarget | null;
   details: Record<string, unknown> | null;
+  ip_address: string | null;
   created_at: string;
 }
 

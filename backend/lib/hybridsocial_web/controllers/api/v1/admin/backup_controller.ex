@@ -3,6 +3,7 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
 
   alias Hybridsocial.Admin.Backup
   alias Hybridsocial.Auth.RBAC
+  alias Hybridsocial.Moderation
 
   defp require_permission(conn, permission) do
     identity = conn.assigns.current_identity
@@ -40,6 +41,8 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
     else
       case Backup.create_backup(admin_id, passphrase, type) do
         {:ok, backup_job} ->
+          Moderation.log(admin_id, "backup.created", "backup", backup_job.id, %{type: type})
+
           conn
           |> put_status(:accepted)
           |> json(%{data: serialize_backup(backup_job)})
@@ -93,6 +96,9 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
   defp do_download(conn, id) do
     case Backup.read_backup_file(id) do
       {:ok, bin, filename} ->
+        admin_id = conn.assigns.current_identity.id
+        Moderation.log(admin_id, "backup.downloaded", "backup", id, %{filename: filename})
+
         conn
         |> put_resp_header("content-disposition", ~s(attachment; filename="#{filename}"))
         |> put_resp_content_type("application/octet-stream")
@@ -144,6 +150,8 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
       true ->
         case Backup.restore_backup(id, passphrase) do
           {:ok, :restored} ->
+            admin_id = conn.assigns.current_identity.id
+            Moderation.log(admin_id, "backup.restored", "backup", id, %{})
             json(conn, %{status: "ok", message: "Database restored."})
 
           {:error, :not_found} ->
@@ -177,8 +185,11 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
 
   def delete(conn, %{"id" => id}) do
     with :ok <- require_permission(conn, "backups.create") do
+      admin_id = conn.assigns.current_identity.id
+
       case Backup.delete_backup(id) do
         {:ok, :deleted} ->
+          Moderation.log(admin_id, "backup.deleted", "backup", id, %{})
           json(conn, %{status: "ok"})
 
         {:error, :not_found} ->

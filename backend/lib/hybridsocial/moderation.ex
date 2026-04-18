@@ -142,6 +142,7 @@ defmodule Hybridsocial.Moderation do
     |> order_by([a], desc: a.created_at)
     |> paginate(opts)
     |> Repo.all()
+    |> Repo.preload(:actor)
   end
 
   defp filter_audit_by_action(query, nil), do: query
