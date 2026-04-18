@@ -354,6 +354,13 @@ defmodule Hybridsocial.Trending do
       )
       |> Repo.all()
 
+    # Fetch a 7-hour sparkline history for every trending hashtag in
+    # one round trip. date_trunc + GROUP BY pairs each hashtag with its
+    # per-hour post count over the last 7h; we then reshape into a
+    # 7-element array per hashtag, zero-filling buckets with no posts.
+    hashtag_ids = Enum.map(results, & &1.hashtag_id)
+    history_by_id = fetch_hashtag_history(hashtag_ids, now)
+
     # Clear old trending hashtags
     TrendingData
     |> where([t], t.type == "hashtag")
@@ -372,13 +379,52 @@ defmodule Hybridsocial.Trending do
         computed_at: now,
         metadata: %{
           post_count: row.post_count,
-          unique_accounts: row.unique_accounts
+          unique_accounts: row.unique_accounts,
+          history: Map.get(history_by_id, row.hashtag_id, List.duplicate(0, 7))
         }
       })
       |> Repo.insert!()
     end)
 
     :ok
+  end
+
+  # Returns %{hashtag_id => [h-6, h-5, ..., h-0]} where each entry is the
+  # count of distinct posts carrying that hashtag within that hour.
+  defp fetch_hashtag_history([], _now), do: %{}
+
+  defp fetch_hashtag_history(hashtag_ids, now) do
+    history_cutoff = DateTime.add(now, -7, :hour)
+
+    # Hour ordinals 0..6 where 0 is the oldest bucket we display.
+    # Floor `now` to the hour via Unix seconds, then subtract 6h so the
+    # last element is the current hour and index 0 is six hours back.
+    current_hour_unix = DateTime.to_unix(now) - rem(DateTime.to_unix(now), 3600)
+    base_hour = DateTime.from_unix!(current_hour_unix - 6 * 3600)
+
+    rows =
+      Post
+      |> join(:inner, [p], ph in "post_hashtags", on: ph.post_id == p.id)
+      |> where([p, ph], ph.hashtag_id in ^hashtag_ids)
+      |> where([p, _ph], p.inserted_at >= ^history_cutoff and is_nil(p.deleted_at))
+      |> group_by([p, ph], [ph.hashtag_id, fragment("date_trunc('hour', ?)", p.inserted_at)])
+      |> select([p, ph], %{
+        hashtag_id: ph.hashtag_id,
+        bucket: fragment("date_trunc('hour', ?)", p.inserted_at),
+        count: count(p.id, :distinct)
+      })
+      |> Repo.all()
+
+    Enum.reduce(rows, %{}, fn row, acc ->
+      bucket_index = DateTime.diff(row.bucket, base_hour, :second) |> div(3600)
+
+      if bucket_index in 0..6 do
+        series = Map.get(acc, row.hashtag_id) || List.duplicate(0, 7)
+        Map.put(acc, row.hashtag_id, List.replace_at(series, bucket_index, row.count))
+      else
+        acc
+      end
+    end)
   end
 
   defp search_backend do

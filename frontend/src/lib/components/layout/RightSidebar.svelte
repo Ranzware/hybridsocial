@@ -11,7 +11,19 @@
     suggestions?: { handle: string; acct?: string; display_name: string; avatar_url: string | null }[];
   } = $props();
 
-  let trending: { tag: string; count: number }[] = $state([]);
+  interface TrendingTag {
+    tag: string;
+    people: number;
+    posts: number;
+    history: number[];
+  }
+  let trending: TrendingTag[] = $state([]);
+
+  interface FollowedTag {
+    id: string;
+    name: string;
+  }
+  let followedTags: FollowedTag[] = $state([]);
 
   let promotedUsers: PromotedUser[] = $state([]);
   let pricing: PromotionPricing | null = $state(null);
@@ -66,22 +78,51 @@
 
   onMount(async () => {
     try {
-      const [users, pricingData, newUsersData, trendingData] = await Promise.all([
+      const [users, pricingData, newUsersData, trendingData, followedTagsData] = await Promise.all([
         getPromotedUsers().catch(() => [] as PromotedUser[]),
         getPromotionPricing().catch(() => null),
         api.get<NewUser[]>('/api/v1/directory/new', { limit: '5' }).catch(() => [] as NewUser[]),
-        api.get<{ name: string; score: number; metadata: { post_count?: number } }[]>('/api/v1/trends/tags')
-          .then(tags => tags.map(t => ({ tag: t.name, count: t.metadata?.post_count ?? 0 })))
-          .catch(() => [] as { tag: string; count: number }[]),
+        api.get<{ name: string; score: number; metadata: { post_count?: number; unique_accounts?: number; history?: number[] } }[]>('/api/v1/trends/tags')
+          .then(tags => tags.map(t => ({
+            tag: t.name,
+            people: t.metadata?.unique_accounts ?? t.metadata?.post_count ?? 0,
+            posts: t.metadata?.post_count ?? 0,
+            history: Array.isArray(t.metadata?.history) ? t.metadata!.history! : []
+          })))
+          .catch(() => [] as TrendingTag[]),
+        api.get<FollowedTag[]>('/api/v1/accounts/followed_tags').catch(() => [] as FollowedTag[]),
       ]);
       promotedUsers = users;
       pricing = pricingData;
       newUsers = newUsersData;
       trending = trendingData;
+      followedTags = followedTagsData;
     } catch {
       // Sidebar is non-critical
     }
   });
+
+  // Build a tiny SVG polyline path from a 7-point history series.
+  // Normalized to fill the viewBox so a flat series still draws a
+  // centered line instead of clipping off-canvas.
+  function sparklinePath(history: number[], w = 56, h = 24): string {
+    if (!history || history.length === 0) return '';
+    const max = Math.max(1, ...history);
+    const min = Math.min(...history);
+    const range = max - min || 1;
+    const step = history.length === 1 ? 0 : w / (history.length - 1);
+    return history
+      .map((v, i) => {
+        const x = i * step;
+        const y = h - ((v - min) / range) * h;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+  }
+
+  function plural(n: number, one: string, many: string): string {
+    return `${n} ${n === 1 ? one : many}`;
+  }
 
   async function handlePurchase() {
     try {
@@ -102,20 +143,66 @@
 
 <aside class="right-sidebar">
   <section class="sidebar-section">
-    <h3 class="section-title">Trending</h3>
+    <header class="section-header">
+      <h3 class="section-title">
+        <svg class="section-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+          <polyline points="16 7 22 7 22 13"/>
+        </svg>
+        Trending
+      </h3>
+    </header>
     {#if trending.length > 0}
-      <ul class="trending-list">
+      <ul class="trend-list">
         {#each trending as item (item.tag)}
           <li>
-            <a href="/explore?q=%23{encodeURIComponent(item.tag)}" class="trending-item">
-              <span class="trending-tag">#{item.tag}</span>
-              <span class="trending-count">{item.count} posts</span>
+            <a href="/tags/{encodeURIComponent(item.tag)}" class="trend-item">
+              <div class="trend-text">
+                <span class="trend-tag">#{item.tag}</span>
+                <span class="trend-meta">{plural(item.people, 'person talking', 'people talking')}</span>
+              </div>
+              {#if item.history.length > 1}
+                <svg class="trend-spark" viewBox="0 0 56 24" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline points={sparklinePath(item.history)} fill="none" stroke="var(--color-primary)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {/if}
             </a>
           </li>
         {/each}
       </ul>
+      <a href="/explore" class="section-link">View all trends</a>
     {:else}
       <p class="empty-text">No trending topics yet.</p>
+    {/if}
+  </section>
+
+  <section class="sidebar-section">
+    <header class="section-header">
+      <h3 class="section-title">
+        <svg class="section-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="4" y1="9" x2="20" y2="9"/>
+          <line x1="4" y1="15" x2="20" y2="15"/>
+          <line x1="10" y1="3" x2="8" y2="21"/>
+          <line x1="16" y1="3" x2="14" y2="21"/>
+        </svg>
+        Followed hashtags
+      </h3>
+    </header>
+    {#if followedTags.length > 0}
+      <ul class="trend-list">
+        {#each followedTags.slice(0, 8) as tag (tag.id)}
+          <li>
+            <a href="/tags/{encodeURIComponent(tag.name)}" class="trend-item">
+              <div class="trend-text">
+                <span class="trend-tag">#{tag.name}</span>
+              </div>
+            </a>
+          </li>
+        {/each}
+      </ul>
+      <a href="/explore" class="section-link">Find more hashtags</a>
+    {:else}
+      <p class="empty-text">You don't follow any hashtags yet. Click a <code class="inline-tag">#tag</code> to follow it.</p>
     {/if}
   </section>
 
@@ -283,10 +370,47 @@
     margin-block-end: var(--space-3);
   }
 
-  .trending-list,
+  .trend-list,
   .suggestions-list {
     display: flex;
     flex-direction: column;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-block-end: var(--space-3);
+  }
+
+  .section-icon {
+    color: var(--color-primary);
+    margin-inline-end: var(--space-1);
+    vertical-align: -2px;
+  }
+
+  .section-link {
+    display: block;
+    margin-block-start: var(--space-2);
+    padding-block-start: var(--space-2);
+    color: var(--color-primary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .section-link:hover {
+    text-decoration: underline;
+  }
+
+  .inline-tag {
+    font-weight: 600;
+    color: var(--color-primary);
+    background: var(--color-secondary-container);
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 0.95em;
   }
 
   .suggestions-enter {
@@ -313,31 +437,53 @@
     }
   }
 
-  .trending-item {
+  .trend-item {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: var(--space-3);
     padding: var(--space-2) var(--space-3);
     margin-inline: calc(-1 * var(--space-3));
     text-decoration: none;
     color: var(--color-on-surface);
     border-radius: var(--radius-lg);
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: background var(--transition-fast);
   }
 
-  .trending-item:hover {
+  .trend-item:hover {
     text-decoration: none;
     background: var(--color-surface-container-low);
-    color: var(--color-primary);
   }
 
-  .trending-tag {
-    font-weight: 600;
+  .trend-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .trend-tag {
+    font-weight: 700;
     font-size: var(--text-sm);
+    color: var(--color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
-  .trending-count {
+  .trend-meta {
     font-size: var(--text-xs);
     color: var(--color-on-surface-variant);
+  }
+
+  .trend-spark {
+    width: 56px;
+    height: 24px;
+    flex-shrink: 0;
+    opacity: 0.75;
+  }
+
+  .trend-item:hover .trend-spark {
+    opacity: 1;
   }
 
   .suggestion-item {
