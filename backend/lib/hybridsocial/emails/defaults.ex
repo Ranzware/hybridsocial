@@ -23,6 +23,10 @@ defmodule Hybridsocial.Emails.Defaults do
   def for("notification_digest"), do: {notification_digest_subject(), notification_digest_html()}
   def for("account_approved"), do: {account_approved_subject(), account_approved_html()}
   def for("account_rejected"), do: {account_rejected_subject(), account_rejected_html()}
+  def for("admin_pending_account"), do: {admin_pending_account_subject(), admin_pending_account_html()}
+  def for("admin_new_report"), do: {admin_new_report_subject(), admin_new_report_html()}
+  def for("admin_new_appeal"), do: {admin_new_appeal_subject(), admin_new_appeal_html()}
+  def for("admin_backup_failed"), do: {admin_backup_failed_subject(), admin_backup_failed_html()}
   def for(_), do: {"", ""}
 
   # ── Subjects ──────────────────────────────────────────────────────
@@ -41,6 +45,18 @@ defmodule Hybridsocial.Emails.Defaults do
 
   defp account_approved_subject, do: "{{instance_name}} — your account is approved"
   defp account_rejected_subject, do: "{{instance_name}} — your account application"
+
+  defp admin_pending_account_subject,
+    do: "[{{instance_name}}] New pending account: @{{applicant.handle}}"
+
+  defp admin_new_report_subject,
+    do: "[{{instance_name}}] New {{report.category}} report from @{{report.reporter_handle}}"
+
+  defp admin_new_appeal_subject,
+    do: "[{{instance_name}}] New appeal from @{{appeal.identity_handle}}"
+
+  defp admin_backup_failed_subject,
+    do: "[{{instance_name}}] Backup failed ({{backup.type}})"
 
   # ── Shared layout helpers ─────────────────────────────────────────
 
@@ -200,6 +216,82 @@ defmodule Hybridsocial.Emails.Defaults do
 
     footer =
       "You're receiving this because you applied for an account on {{instance_name}}."
+
+    layout(content, footer)
+  end
+
+  # ── Admin-facing emails ───────────────────────────────────────────
+
+  defp admin_pending_account_html do
+    content = """
+    <h1 style="margin:0 0 16px 0;font-size:20px;font-weight:700;">New pending account</h1>
+    <p style="margin:0 0 16px 0;">Hi {{staff.display_name}}, a new user is waiting for approval on {{instance_name}}.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Handle</td><td style="padding:4px 0;">@{{applicant.handle}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Display name</td><td style="padding:4px 0;">{{applicant.display_name}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Email</td><td style="padding:4px 0;">{{applicant.email}}</td></tr>
+    </table>
+    #{button("Review in queue", "{{approvals_url}}")}
+    """
+
+    footer =
+      "You're receiving this because \"admin_pending_account\" email notifications are enabled on your staff account. Turn it off anytime in your notification preferences."
+
+    layout(content, footer)
+  end
+
+  defp admin_new_report_html do
+    content = """
+    <h1 style="margin:0 0 16px 0;font-size:20px;font-weight:700;">New report filed</h1>
+    <p style="margin:0 0 16px 0;">Hi {{staff.display_name}}, a new report landed on {{instance_name}}.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Category</td><td style="padding:4px 0;">{{report.category}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Target</td><td style="padding:4px 0;">{{report.target_type}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Reporter</td><td style="padding:4px 0;">@{{report.reporter_handle}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Reported</td><td style="padding:4px 0;">@{{report.reported_handle}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;vertical-align:top;color:#6b7280;">Comment</td><td style="padding:4px 0;">{{report.comment}}</td></tr>
+    </table>
+    #{button("Open reports queue", "{{reports_url}}")}
+    """
+
+    footer =
+      "You're receiving this because \"admin_new_report\" email notifications are enabled on your staff account."
+
+    layout(content, footer)
+  end
+
+  defp admin_new_appeal_html do
+    content = """
+    <h1 style="margin:0 0 16px 0;font-size:20px;font-weight:700;">New appeal filed</h1>
+    <p style="margin:0 0 16px 0;">Hi {{staff.display_name}}, @{{appeal.identity_handle}} appealed a moderation action on {{instance_name}}.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Action appealed</td><td style="padding:4px 0;">{{appeal.action_type}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;vertical-align:top;color:#6b7280;">Reason given</td><td style="padding:4px 0;">{{appeal.reason}}</td></tr>
+    </table>
+    #{button("Review appeal", "{{appeals_url}}")}
+    """
+
+    footer =
+      "You're receiving this because \"admin_new_appeal\" email notifications are enabled on your staff account."
+
+    layout(content, footer)
+  end
+
+  defp admin_backup_failed_html do
+    content = """
+    <h1 style="margin:0 0 16px 0;font-size:20px;font-weight:700;color:#991b1b;">A backup job failed</h1>
+    <p style="margin:0 0 16px 0;">Hi {{staff.display_name}}, a scheduled backup on {{instance_name}} did not complete successfully.</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;font-size:14px;">
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Job id</td><td style="padding:4px 0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">{{backup.id}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Type</td><td style="padding:4px 0;">{{backup.type}}</td></tr>
+      <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Started</td><td style="padding:4px 0;">{{backup.started_at}}</td></tr>
+    </table>
+    <p style="margin:0;font-size:14px;">Check server logs for the root cause (usually disk space, pg_dump version mismatch, or storage permissions).</p>
+    #{button("Open backups", "{{backups_url}}")}
+    """
+
+    footer =
+      "You're receiving this because \"admin_backup_failed\" email notifications are enabled on your staff account."
 
     layout(content, footer)
   end

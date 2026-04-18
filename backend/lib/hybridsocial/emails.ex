@@ -103,6 +103,72 @@ defmodule Hybridsocial.Emails do
     render("account_rejected", user, assigns)
   end
 
+  @doc "Admin-facing: new pending account awaiting approval."
+  def admin_pending_account_email(to_email, staff_identity, applicant_identity, applicant_user) do
+    assigns = %{
+      "instance_name" => instance_name(),
+      "staff" => user_assigns(staff_identity),
+      "applicant" => %{
+        "handle" => Map.get(applicant_identity, :handle) || "",
+        "display_name" => Map.get(applicant_identity, :display_name) || Map.get(applicant_identity, :handle) || "",
+        "email" => Map.get(applicant_user, :email) || ""
+      },
+      "approvals_url" => "#{base_url()}/admin/approvals"
+    }
+
+    admin_render("admin_pending_account", to_email, assigns)
+  end
+
+  @doc "Admin-facing: new user report."
+  def admin_new_report_email(to_email, staff_identity, report) do
+    assigns = %{
+      "instance_name" => instance_name(),
+      "staff" => user_assigns(staff_identity),
+      "report" => %{
+        "category" => to_string(report.category || ""),
+        "target_type" => to_string(report.target_type || ""),
+        "reporter_handle" => (report.reporter && report.reporter.handle) || "",
+        "reported_handle" => (report.reported && report.reported.handle) || "",
+        "comment" => to_string(Map.get(report, :comment) || "")
+      },
+      "reports_url" => "#{base_url()}/admin/moderation?tab=reports"
+    }
+
+    admin_render("admin_new_report", to_email, assigns)
+  end
+
+  @doc "Admin-facing: new appeal."
+  def admin_new_appeal_email(to_email, staff_identity, appeal) do
+    assigns = %{
+      "instance_name" => instance_name(),
+      "staff" => user_assigns(staff_identity),
+      "appeal" => %{
+        "identity_handle" => (appeal.identity && appeal.identity.handle) || "",
+        "action_type" => to_string(appeal.action_type || ""),
+        "reason" => to_string(appeal.reason || "")
+      },
+      "appeals_url" => "#{base_url()}/admin/appeals"
+    }
+
+    admin_render("admin_new_appeal", to_email, assigns)
+  end
+
+  @doc "Admin-facing: a backup job failed."
+  def admin_backup_failed_email(to_email, staff_identity, backup) do
+    assigns = %{
+      "instance_name" => instance_name(),
+      "staff" => user_assigns(staff_identity),
+      "backup" => %{
+        "id" => to_string(backup.id),
+        "type" => to_string(Map.get(backup, :type) || ""),
+        "started_at" => to_string(Map.get(backup, :started_at) || "")
+      },
+      "backups_url" => "#{base_url()}/admin/backups"
+    }
+
+    admin_render("admin_backup_failed", to_email, assigns)
+  end
+
   @doc "Notification digest summarising recent notifications."
   def notification_digest_email(user, notifications) do
     count = length(notifications)
@@ -129,6 +195,21 @@ defmodule Hybridsocial.Emails do
 
     new()
     |> to({user_display_name(user), user_email(user)})
+    |> from(from_address())
+    |> subject(subject)
+    |> html_body(html)
+    |> text_body(text)
+  end
+
+  # Admin-facing emails route to an already-resolved staff email
+  # address; we skip the user struct path because the recipient here
+  # is chosen by `Notifications.StaffEmail.dispatch/3`, not by a
+  # user-facing action.
+  defp admin_render(key, to_email, assigns) do
+    {subject, html, text} = Renderer.render(key, assigns)
+
+    new()
+    |> to(to_email)
     |> from(from_address())
     |> subject(subject)
     |> html_body(html)

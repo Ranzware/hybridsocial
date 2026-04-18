@@ -22,6 +22,18 @@ defmodule HybridsocialWeb.Api.V1.AppealController do
           action_type: appeal.action_type
         })
 
+        Task.Supervisor.start_child(Hybridsocial.TaskSupervisor, fn ->
+          preloaded = Hybridsocial.Repo.preload(appeal, :identity)
+
+          Hybridsocial.Notifications.StaffEmail.dispatch(
+            "admin_new_appeal",
+            "users.manage",
+            fn to, staff_identity ->
+              Hybridsocial.Emails.admin_new_appeal_email(to, staff_identity, preloaded)
+            end
+          )
+        end)
+
         conn |> put_status(:created) |> json(%{data: serialize_appeal(appeal)})
 
       {:error, :already_pending} ->

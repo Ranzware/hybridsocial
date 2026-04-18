@@ -77,6 +77,22 @@ defmodule Hybridsocial.Accounts do
           _ -> :ok
         end
 
+        # In approval mode the new account sits pending until an admin
+        # acts; let opted-in admins know there's something to review.
+        # Fire-and-forget — the user's registration shouldn't fail if
+        # SMTP is down.
+        if Hybridsocial.Config.get("registration_mode", "open") == "approval" do
+          Task.Supervisor.start_child(Hybridsocial.TaskSupervisor, fn ->
+            Hybridsocial.Notifications.StaffEmail.dispatch(
+              "admin_pending_account",
+              "users.edit",
+              fn to, staff_identity ->
+                Hybridsocial.Emails.admin_pending_account_email(to, staff_identity, identity, user)
+              end
+            )
+          end)
+        end
+
         identity = %{identity | user: user}
         Phoenix.PubSub.broadcast(Hybridsocial.PubSub, "identities", {:identity_created, identity})
         {:ok, identity}

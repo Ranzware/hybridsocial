@@ -124,6 +124,102 @@ defmodule Hybridsocial.Emails.Templates do
       }
     },
     %{
+      key: "admin_pending_account",
+      name: "Admin: new pending account",
+      description: "Sent to admins (with users.edit) when approval-mode registration creates a new pending user.",
+      variables: %{
+        "instance_name" => "Instance display name",
+        "staff.display_name" => "Recipient admin's display name",
+        "applicant.handle" => "Applicant's handle",
+        "applicant.display_name" => "Applicant's display name",
+        "applicant.email" => "Applicant's email",
+        "approvals_url" => "Absolute URL to /admin/approvals"
+      },
+      sample: %{
+        "instance_name" => "HybridSocial",
+        "staff" => %{"display_name" => "Admin"},
+        "applicant" => %{
+          "handle" => "newuser",
+          "display_name" => "New User",
+          "email" => "new@example.com"
+        },
+        "approvals_url" => "https://example.com/admin/approvals"
+      }
+    },
+    %{
+      key: "admin_new_report",
+      name: "Admin: new report",
+      description: "Sent to admins (with reports.manage) when a user files a new report.",
+      variables: %{
+        "instance_name" => "Instance display name",
+        "staff.display_name" => "Recipient admin's display name",
+        "report.category" => "Category picked by the reporter",
+        "report.target_type" => "post or identity",
+        "report.reporter_handle" => "Who filed it",
+        "report.reported_handle" => "Who they're reporting (may be blank for post-only)",
+        "report.comment" => "Reporter's notes",
+        "reports_url" => "Absolute URL to /admin/reports"
+      },
+      sample: %{
+        "instance_name" => "HybridSocial",
+        "staff" => %{"display_name" => "Admin"},
+        "report" => %{
+          "category" => "spam",
+          "target_type" => "post",
+          "reporter_handle" => "alice",
+          "reported_handle" => "bob",
+          "comment" => "Posting the same link in every thread."
+        },
+        "reports_url" => "https://example.com/admin/moderation?tab=reports"
+      }
+    },
+    %{
+      key: "admin_new_appeal",
+      name: "Admin: new appeal",
+      description: "Sent to admins (with users.manage) when a user appeals a moderation action.",
+      variables: %{
+        "instance_name" => "Instance display name",
+        "staff.display_name" => "Recipient admin's display name",
+        "appeal.identity_handle" => "Who filed the appeal",
+        "appeal.action_type" => "The action being appealed (suspend, silence, warn…)",
+        "appeal.reason" => "The user's reason",
+        "appeals_url" => "Absolute URL to /admin/appeals"
+      },
+      sample: %{
+        "instance_name" => "HybridSocial",
+        "staff" => %{"display_name" => "Admin"},
+        "appeal" => %{
+          "identity_handle" => "alice",
+          "action_type" => "suspend",
+          "reason" => "I think this was a mistake — the bot flagged a quoted URL."
+        },
+        "appeals_url" => "https://example.com/admin/appeals"
+      }
+    },
+    %{
+      key: "admin_backup_failed",
+      name: "Admin: backup failed",
+      description: "Sent to admins (with backups.view) when a backup job ends in status=failed. Critical-ish; default throttle still applies.",
+      variables: %{
+        "instance_name" => "Instance display name",
+        "staff.display_name" => "Recipient admin's display name",
+        "backup.id" => "Backup job id",
+        "backup.type" => "full / schema / etc.",
+        "backup.started_at" => "When it started",
+        "backups_url" => "Absolute URL to /admin/backups"
+      },
+      sample: %{
+        "instance_name" => "HybridSocial",
+        "staff" => %{"display_name" => "Admin"},
+        "backup" => %{
+          "id" => "00000000-0000-0000-0000-000000000000",
+          "type" => "full",
+          "started_at" => "2026-04-18T22:15:00Z"
+        },
+        "backups_url" => "https://example.com/admin/backups"
+      }
+    },
+    %{
       key: "notification_digest",
       name: "Notification digest",
       description: "Summarises recent in-app notifications for users who opted in.",

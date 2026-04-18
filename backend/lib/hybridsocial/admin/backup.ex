@@ -141,18 +141,39 @@ defmodule Hybridsocial.Admin.Backup do
         {error_output, _exit_code} ->
           Logger.error("pg_dump failed: #{error_output}")
 
-          backup_job
-          |> BackupJob.changeset(%{status: "failed", completed_at: DateTime.utc_now()})
-          |> Repo.update()
+          {:ok, failed} =
+            backup_job
+            |> BackupJob.changeset(%{status: "failed", completed_at: DateTime.utc_now()})
+            |> Repo.update()
+
+          notify_backup_failed(failed)
       end
     rescue
       e ->
         Logger.error("Backup generation failed: #{inspect(e)}")
 
-        backup_job
-        |> BackupJob.changeset(%{status: "failed", completed_at: DateTime.utc_now()})
-        |> Repo.update()
+        {:ok, failed} =
+          backup_job
+          |> BackupJob.changeset(%{status: "failed", completed_at: DateTime.utc_now()})
+          |> Repo.update()
+
+        notify_backup_failed(failed)
     end
+  end
+
+  # Async + rate-limited per-recipient. Wrapped in its own
+  # Task.Supervisor child so a mailer outage can't bubble up into the
+  # backup worker and mask the original failure.
+  defp notify_backup_failed(backup) do
+    Task.Supervisor.start_child(Hybridsocial.TaskSupervisor, fn ->
+      Hybridsocial.Notifications.StaffEmail.dispatch(
+        "admin_backup_failed",
+        "backups.view",
+        fn to, staff_identity ->
+          Hybridsocial.Emails.admin_backup_failed_email(to, staff_identity, backup)
+        end
+      )
+    end)
   end
 
   @doc """
