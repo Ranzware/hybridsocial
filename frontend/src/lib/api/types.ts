@@ -109,6 +109,10 @@ export interface Post {
   is_bookmarked: boolean;
   is_muted: boolean;
   current_user_reaction: string | null;
+  // Client-only flag set by the composer when it inserts an
+  // optimistic post into a feed. Cleared when the server response
+  // comes back via the post-replace event.
+  pending?: boolean;
   created_at: string;
   edited_at: string | null;
   edit_expires_at: string | null;

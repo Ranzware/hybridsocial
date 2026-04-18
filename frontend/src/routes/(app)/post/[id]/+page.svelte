@@ -72,12 +72,24 @@
       descendants = descendants.filter(d => d.id !== id);
     }
 
+    // Swap the optimistic reply out for the real server response.
+    // Covers both the focused post (edit case) and any descendant
+    // reply that was optimistically inserted by handleNewPost.
+    function handlePostReplace(e: Event) {
+      const { oldId, post: real } = (e as CustomEvent<{ oldId: string; post: Post }>).detail;
+      if (!oldId || !real) return;
+      if (post && post.id === oldId) post = real;
+      descendants = descendants.map((d) => (d.id === oldId ? real : d));
+    }
+
     window.addEventListener('new-post', handleNewPost);
     window.addEventListener('post-deleted', handlePostDeleted);
+    window.addEventListener('post-replace', handlePostReplace);
 
     return () => {
       window.removeEventListener('new-post', handleNewPost);
       window.removeEventListener('post-deleted', handlePostDeleted);
+      window.removeEventListener('post-replace', handlePostReplace);
     };
   });
 

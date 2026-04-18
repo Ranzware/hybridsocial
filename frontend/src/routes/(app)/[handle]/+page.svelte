@@ -215,12 +215,37 @@
     window.location.href = '/settings';
   }
 
+  // Show a freshly-posted status on the author's own profile feed
+  // immediately, without waiting for a reload. Same event shape the
+  // home timeline uses — composer dispatches `new-post` with an
+  // optimistic (pending: true) post, then `post-replace` once the
+  // server confirms.
+  function handleNewPost(e: Event) {
+    const newPost = (e as CustomEvent<Post>).detail;
+    if (!newPost || !isOwnProfile) return;
+    // Skip replies on the main "Posts" tab — they belong under a
+    // reply tab or the parent post page.
+    if (newPost.parent_id && activeTab === 'posts') return;
+    if (posts.some((p) => p.id === newPost.id)) return;
+    posts = [newPost, ...posts];
+  }
+
+  function handlePostReplace(e: Event) {
+    const { oldId, post } = (e as CustomEvent<{ oldId: string; post: Post }>).detail;
+    if (!oldId || !post) return;
+    posts = posts.map((p) => (p.id === oldId ? post : p));
+  }
+
   onMount(() => {
     loadProfile();
 
     window.addEventListener('chat-event', handleRealtimeEvent as EventListener);
+    window.addEventListener('new-post', handleNewPost);
+    window.addEventListener('post-replace', handlePostReplace);
     return () => {
       window.removeEventListener('chat-event', handleRealtimeEvent as EventListener);
+      window.removeEventListener('new-post', handleNewPost);
+      window.removeEventListener('post-replace', handlePostReplace);
       unsub();
     };
   });

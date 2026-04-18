@@ -272,6 +272,8 @@
   class="post-card"
   class:compact
   class:detail
+  class:post-card-pending={post.pending}
+  aria-busy={post.pending ? 'true' : undefined}
   role="article"
   tabindex={detail ? -1 : 0}
   onclick={handleCardClick}
@@ -311,6 +313,12 @@
             <time class="post-time" datetime={post.created_at} title={fullDate}>{timeAgo}</time>
             {#if post.edited_at}
               <span class="post-edited" title="Edited {fullDateTime(post.edited_at)}">(edited)</span>
+            {/if}
+            {#if post.pending}
+              <span class="post-pending-badge" aria-live="polite">
+                <span class="spinner" aria-hidden="true"></span>
+                Posting…
+              </span>
             {/if}
           </div>
         </div>
@@ -629,6 +637,42 @@
   .post-tombstone:hover {
     background: var(--color-surface-container-lowest);
   }
+
+  /* Optimistic post — rendered immediately on submit, swapped out
+     once the server responds. Faded body + a subtle pulse so users
+     know the post hasn't fully committed yet. */
+  .post-card-pending {
+    opacity: 0.55;
+    animation: post-pending-pulse 1.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes post-pending-pulse {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 0.8; }
+  }
+
+  .post-pending-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--color-text-tertiary);
+    margin-inline-start: 6px;
+  }
+
+  .post-pending-badge .spinner {
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   .tombstone-content {
     display: flex;
