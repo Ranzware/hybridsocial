@@ -26,7 +26,7 @@
     premium: 'Premium'
   };
 
-  let groupedSettings = $derived(() => {
+  let groupedSettings = $derived.by(() => {
     const groups: Record<string, AdminSetting[]> = {};
     for (const s of settings) {
       const cat = (s.category || 'general').toLowerCase();
@@ -192,7 +192,7 @@
       {/each}
     </div>
   {:else}
-    {#each groupedSettings() as [category, categorySettings] (category)}
+    {#each groupedSettings as [category, categorySettings] (category)}
       <section class="settings-category card">
         <h2 class="category-title">{categoryLabels[category] || category}</h2>
 
