@@ -3075,7 +3075,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
               json(conn, %{password: new_password})
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "account.user_not_found"})
+              conn |> put_status(:not_found) |> json(%{
+                error: "account.no_login",
+                message:
+                  "This identity has no email/password on file — likely a subaccount (bot/page/group) whose parent user owns the credentials."
+              })
 
             {:error, changeset} ->
               conn
@@ -3100,7 +3104,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
         _identity ->
           case Accounts.get_user_by_identity(id) do
             nil ->
-              conn |> put_status(:not_found) |> json(%{error: "account.user_not_found"})
+              conn |> put_status(:not_found) |> json(%{
+                error: "account.no_login",
+                message:
+                  "This identity has no email/password on file — likely a subaccount (bot/page/group) whose parent user owns the credentials."
+              })
 
             user ->
               admin_id = conn.assigns.current_identity.id
@@ -3136,7 +3144,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
                 json(conn, %{status: "ok", email: new_email})
 
               {:error, :not_found} ->
-                conn |> put_status(:not_found) |> json(%{error: "account.user_not_found"})
+                conn |> put_status(:not_found) |> json(%{
+                error: "account.no_login",
+                message:
+                  "This identity has no email/password on file — likely a subaccount (bot/page/group) whose parent user owns the credentials."
+              })
 
               {:error, changeset} ->
                 conn
@@ -3167,7 +3179,11 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
               json(conn, %{status: "ok"})
 
             {:error, :not_found} ->
-              conn |> put_status(:not_found) |> json(%{error: "account.user_not_found"})
+              conn |> put_status(:not_found) |> json(%{
+                error: "account.no_login",
+                message:
+                  "This identity has no email/password on file — likely a subaccount (bot/page/group) whose parent user owns the credentials."
+              })
 
             {:error, _} ->
               conn

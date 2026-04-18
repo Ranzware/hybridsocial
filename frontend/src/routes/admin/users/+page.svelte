@@ -548,7 +548,13 @@
                 <button class="dropdown-item" type="button" onclick={() => openTrustModal(row as unknown as AdminUser)}>
                   Set Trust Level
                 </button>
-                {#if row['is_local']}
+                {#if row['is_local'] && row['email']}
+                  <!-- Account-management actions only apply to local
+                       identities that have a User row attached (i.e.
+                       a real login). Subaccounts like bots/pages/
+                       groups are local but reuse their parent user's
+                       credentials and have no email of their own —
+                       hide the actions instead of 404ing on click. -->
                   <hr class="dropdown-divider" />
                   <button class="dropdown-item" type="button" onclick={() => openEmailModal(row as unknown as AdminUser)}>
                     Change Email
