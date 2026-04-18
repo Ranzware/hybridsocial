@@ -280,9 +280,7 @@ defmodule Hybridsocial.Federation.NodeInfo do
         {:ok, inst}
 
       {:error, changeset} ->
-        Logger.warning(
-          "NodeInfo cache upsert failed for #{host}: #{inspect(changeset.errors)}"
-        )
+        Logger.warning("NodeInfo cache upsert failed for #{host}: #{inspect(changeset.errors)}")
 
         {:error, changeset}
     end

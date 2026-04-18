@@ -58,8 +58,13 @@ defmodule Hybridsocial.Federation.Relays do
 
             Repo.get(Relay, relay.id)
             |> case do
-              nil -> :ok
-              r -> r |> Relay.changeset(%{status: "failed", last_error: inspect(reason)}) |> Repo.update()
+              nil ->
+                :ok
+
+              r ->
+                r
+                |> Relay.changeset(%{status: "failed", last_error: inspect(reason)})
+                |> Repo.update()
             end
         end
       end)
@@ -109,7 +114,9 @@ defmodule Hybridsocial.Federation.Relays do
     end
   end
 
-  defp send_undo(%Relay{inbox_url: inbox_url, actor_url: actor_url, follow_activity_id: follow_id} = relay) do
+  defp send_undo(
+         %Relay{inbox_url: inbox_url, actor_url: actor_url, follow_activity_id: follow_id} = relay
+       ) do
     alias Hybridsocial.Federation.InstanceActor
     alias Hybridsocial.Federation.Publisher
 

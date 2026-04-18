@@ -484,9 +484,7 @@ defmodule Hybridsocial.Messaging do
         Participant
         |> where([p], p.conversation_id == ^conversation_id and is_nil(p.left_at))
         |> where([p], p.identity_id != ^sender_id)
-        |> join(:inner, [p], i in Hybridsocial.Accounts.Identity,
-          on: i.id == p.identity_id
-        )
+        |> join(:inner, [p], i in Hybridsocial.Accounts.Identity, on: i.id == p.identity_id)
         |> where([p, i], not is_nil(i.ap_actor_url))
         |> select([p, i], i)
         |> Repo.all()

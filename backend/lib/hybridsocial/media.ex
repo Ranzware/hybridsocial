@@ -128,7 +128,8 @@ defmodule Hybridsocial.Media do
   # Remote attachment not yet cached locally — serve via the media
   # proxy when enabled (hides origin from the browser), otherwise
   # fall back to the raw remote URL so the image at least loads.
-  def media_url(%MediaFile{remote_url: remote_url}) when is_binary(remote_url) and remote_url != "" do
+  def media_url(%MediaFile{remote_url: remote_url})
+      when is_binary(remote_url) and remote_url != "" do
     Hybridsocial.Media.MediaProxy.url(remote_url) || remote_url
   end
 

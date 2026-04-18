@@ -11,6 +11,7 @@ defmodule Hybridsocial.Repo.Migrations.AddDirectPostPlumbing do
     create table(:post_mentions, primary_key: false) do
       add :id, :binary_id, primary_key: true
       add :post_id, references(:posts, type: :binary_id, on_delete: :delete_all), null: false
+
       add :identity_id, references(:identities, type: :binary_id, on_delete: :delete_all),
         null: false
 

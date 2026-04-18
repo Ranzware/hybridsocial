@@ -136,7 +136,8 @@ defmodule Hybridsocial.Emails do
       "staff" => user_assigns(staff_identity),
       "applicant" => %{
         "handle" => Map.get(applicant_identity, :handle) || "",
-        "display_name" => Map.get(applicant_identity, :display_name) || Map.get(applicant_identity, :handle) || "",
+        "display_name" =>
+          Map.get(applicant_identity, :display_name) || Map.get(applicant_identity, :handle) || "",
         "email" => Map.get(applicant_user, :email) || ""
       },
       "approvals_url" => "#{base_url()}/admin/approvals"

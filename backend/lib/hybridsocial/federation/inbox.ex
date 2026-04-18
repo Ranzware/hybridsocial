@@ -178,16 +178,12 @@ defmodule Hybridsocial.Federation.Inbox do
               Logger.info("Accept{Follow} delivered to #{inbox_url}")
 
             {:error, reason} ->
-              Logger.warning(
-                "Accept{Follow} delivery failed to #{inbox_url}: #{inspect(reason)}"
-              )
+              Logger.warning("Accept{Follow} delivery failed to #{inbox_url}: #{inspect(reason)}")
           end
         end
       )
     else
-      Logger.warning(
-        "No inbox URL for #{remote_identity.ap_actor_url} — Accept not delivered"
-      )
+      Logger.warning("No inbox URL for #{remote_identity.ap_actor_url} — Accept not delivered")
     end
   end
 
@@ -230,17 +226,21 @@ defmodule Hybridsocial.Federation.Inbox do
   # follow or a Pleroma-style relay follow; accept_relay/1 will
   # return :not_found if no matching row exists, which lets the
   # caller fall through to user-follow handling.
-  defp relay_follow?(%{"type" => "Follow", "object" => "https://www.w3.org/ns/activitystreams#Public"}),
-    do: true
+  defp relay_follow?(%{
+         "type" => "Follow",
+         "object" => "https://www.w3.org/ns/activitystreams#Public"
+       }),
+       do: true
 
   defp relay_follow?(%{"type" => "Follow", "object" => object})
        when is_binary(object),
-    do: known_relay_actor?(object)
+       do: known_relay_actor?(object)
 
   defp relay_follow?(_), do: false
 
   defp known_relay_actor?(actor_url) do
     import Ecto.Query
+
     Hybridsocial.Repo.exists?(
       from r in Hybridsocial.Federation.Relay, where: r.actor_url == ^actor_url
     )
@@ -442,7 +442,8 @@ defmodule Hybridsocial.Federation.Inbox do
     end
   end
 
-  defp notify_remote_quote(%Post{} = post, %{"quoteUrl" => quote_url}) when is_binary(quote_url) do
+  defp notify_remote_quote(%Post{} = post, %{"quoteUrl" => quote_url})
+       when is_binary(quote_url) do
     case get_post_by_ap_id(quote_url) do
       %Post{identity_id: quoted_author_id} ->
         Hybridsocial.Notifications.create_notification(%{
@@ -1400,5 +1401,4 @@ defmodule Hybridsocial.Federation.Inbox do
   end
 
   defp lookup_local_identity(_), do: nil
-
 end

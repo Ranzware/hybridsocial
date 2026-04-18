@@ -22,8 +22,7 @@ defmodule Hybridsocial.Repo.Migrations.AddMissingPermissions do
     {"users.manage", "Manage user accounts (password, email, 2FA)", "users", ~w(owner admin)},
     {"users.moderate", "Silence, shadow ban, force sensitive", "users",
      ~w(owner admin moderator)},
-    {"content.manage", "Manage content beyond deletion", "content",
-     ~w(owner admin moderator)},
+    {"content.manage", "Manage content beyond deletion", "content", ~w(owner admin moderator)},
     {"settings.manage", "Manage instance settings", "settings", ~w(owner admin)}
   ]
 

@@ -66,6 +66,7 @@ defmodule Hybridsocial.Social do
             # activity, so we skip notifying here in that case.
             if not remote?(target) do
               type = if status == :pending, do: "follow_request", else: "follow"
+
               Hybridsocial.Notifications.create_notification(%{
                 recipient_id: followee_id,
                 actor_id: follower_id,

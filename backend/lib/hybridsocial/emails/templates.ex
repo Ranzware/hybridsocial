@@ -121,7 +121,8 @@ defmodule Hybridsocial.Emails.Templates do
         "instance_name" => "HybridSocial",
         "user" => %{"display_name" => "Sample User", "handle" => "sample"},
         "appeal" => %{"action_type" => "suspend"},
-        "response" => "You're right — the flag was from a misconfigured filter. We've removed the suspension.",
+        "response" =>
+          "You're right — the flag was from a misconfigured filter. We've removed the suspension.",
         "app_url" => "https://example.com"
       }
     },
@@ -148,7 +149,8 @@ defmodule Hybridsocial.Emails.Templates do
     %{
       key: "account_rejected",
       name: "Account rejected",
-      description: "Sent when an admin rejects a pending account. Optional — leave disabled if you'd rather not notify.",
+      description:
+        "Sent when an admin rejects a pending account. Optional — leave disabled if you'd rather not notify.",
       variables: %{
         "instance_name" => "Instance display name",
         "user.display_name" => "Recipient's display name",
@@ -166,7 +168,8 @@ defmodule Hybridsocial.Emails.Templates do
     %{
       key: "admin_pending_account",
       name: "Admin: new pending account",
-      description: "Sent to admins (with users.edit) when approval-mode registration creates a new pending user.",
+      description:
+        "Sent to admins (with users.edit) when approval-mode registration creates a new pending user.",
       variables: %{
         "instance_name" => "Instance display name",
         "staff.display_name" => "Recipient admin's display name",
@@ -239,7 +242,8 @@ defmodule Hybridsocial.Emails.Templates do
     %{
       key: "admin_backup_failed",
       name: "Admin: backup failed",
-      description: "Sent to admins (with backups.view) when a backup job ends in status=failed. Critical-ish; default throttle still applies.",
+      description:
+        "Sent to admins (with backups.view) when a backup job ends in status=failed. Critical-ish; default throttle still applies.",
       variables: %{
         "instance_name" => "Instance display name",
         "staff.display_name" => "Recipient admin's display name",
@@ -262,7 +266,8 @@ defmodule Hybridsocial.Emails.Templates do
     %{
       key: "generic_notification",
       name: "In-app notification (email channel)",
-      description: "Used whenever a user opted into email for a specific in-app notification type (follow, reply, mention, reaction, boost, …). Title and body come from the triggering event.",
+      description:
+        "Used whenever a user opted into email for a specific in-app notification type (follow, reply, mention, reaction, boost, …). Title and body come from the triggering event.",
       variables: %{
         "instance_name" => "Instance display name",
         "title" => "The notification's title line (e.g. \"@alice followed you\")",
@@ -293,7 +298,8 @@ defmodule Hybridsocial.Emails.Templates do
         "instance_name" => "HybridSocial",
         "user" => %{"display_name" => "Sample User", "handle" => "sample"},
         "count" => 3,
-        "summary_html" => "<ul><li>@alice followed you</li><li>@bob replied to your post</li><li>@carol mentioned you</li></ul>",
+        "summary_html" =>
+          "<ul><li>@alice followed you</li><li>@bob replied to your post</li><li>@carol mentioned you</li></ul>",
         "app_url" => "https://example.com"
       }
     }
@@ -354,11 +360,15 @@ defmodule Hybridsocial.Emails.Templates do
   @doc "Remove the override entirely so the hardcoded default is used."
   def reset(key) when is_binary(key) do
     case get(key) do
-      nil -> :ok
-      template -> Repo.delete(template) |> case do
-        {:ok, _} -> :ok
-        err -> err
-      end
+      nil ->
+        :ok
+
+      template ->
+        Repo.delete(template)
+        |> case do
+          {:ok, _} -> :ok
+          err -> err
+        end
     end
   end
 

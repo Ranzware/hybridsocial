@@ -25,11 +25,17 @@ defmodule Hybridsocial.Emails.Defaults do
   def for("account_rejected"), do: {account_rejected_subject(), account_rejected_html()}
   def for("appeal_approved"), do: {appeal_approved_subject(), appeal_approved_html()}
   def for("appeal_rejected"), do: {appeal_rejected_subject(), appeal_rejected_html()}
-  def for("admin_pending_account"), do: {admin_pending_account_subject(), admin_pending_account_html()}
+
+  def for("admin_pending_account"),
+    do: {admin_pending_account_subject(), admin_pending_account_html()}
+
   def for("admin_new_report"), do: {admin_new_report_subject(), admin_new_report_html()}
   def for("admin_new_appeal"), do: {admin_new_appeal_subject(), admin_new_appeal_html()}
   def for("admin_backup_failed"), do: {admin_backup_failed_subject(), admin_backup_failed_html()}
-  def for("generic_notification"), do: {generic_notification_subject(), generic_notification_html()}
+
+  def for("generic_notification"),
+    do: {generic_notification_subject(), generic_notification_html()}
+
   def for(_), do: {"", ""}
 
   # ── Subjects ──────────────────────────────────────────────────────
@@ -38,8 +44,7 @@ defmodule Hybridsocial.Emails.Defaults do
   defp password_reset_subject, do: "{{instance_name}} — reset your password"
 
   defp moderation_queue_subject,
-    do:
-      "{{instance_name}} — moderation queue: new {{item.severity}}-severity {{item.item_type}}"
+    do: "{{instance_name}} — moderation queue: new {{item.severity}}-severity {{item.item_type}}"
 
   defp login_notification_subject, do: "{{instance_name}} — new login to your account"
 

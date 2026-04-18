@@ -11,9 +11,13 @@ defmodule Hybridsocial.Repo.Migrations.BackfillSettingCategories do
 
   def up do
     execute "UPDATE instance_settings SET category = 'tiers'   WHERE category = 'general' AND (key LIKE 'tier_%'   OR key LIKE 'tiers_%')"
+
     execute "UPDATE instance_settings SET category = 'theme'   WHERE category = 'general' AND key LIKE 'theme_%'"
+
     execute "UPDATE instance_settings SET category = 'email'   WHERE category = 'general' AND key LIKE 'email_%'"
+
     execute "UPDATE instance_settings SET category = 'apps'    WHERE category = 'general' AND key LIKE 'app_%'"
+
     execute "UPDATE instance_settings SET category = 'backups' WHERE category = 'general' AND key LIKE 'backup_%'"
   end
 

@@ -161,10 +161,14 @@ defmodule HybridsocialWeb.Api.V1.Admin.BackupController do
             conn |> put_status(:not_found) |> json(%{error: "backup.no_file"})
 
           {:error, :invalid_passphrase} ->
-            conn |> put_status(:unprocessable_entity) |> json(%{error: "backup.invalid_passphrase"})
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: "backup.invalid_passphrase"})
 
           {:error, :decryption_failed} ->
-            conn |> put_status(:unprocessable_entity) |> json(%{error: "backup.decryption_failed"})
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: "backup.decryption_failed"})
 
           {:error, {:file_read_error, reason}} ->
             conn

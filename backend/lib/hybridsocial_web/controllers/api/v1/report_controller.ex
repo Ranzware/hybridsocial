@@ -61,7 +61,7 @@ defmodule HybridsocialWeb.Api.V1.ReportController do
         # Optional: federate the report as an ActivityPub Flag to the
         # origin instance so their moderators see it too. Only makes
         # sense when the reported account actually lives remotely.
-        if forward? and reported && remote?(reported) do
+        if (forward? and reported) && remote?(reported) do
           Task.Supervisor.start_child(Hybridsocial.TaskSupervisor, fn ->
             forward_to_origin(report, reported)
           end)
@@ -73,7 +73,7 @@ defmodule HybridsocialWeb.Api.V1.ReportController do
           id: report.id,
           category: report.category,
           status: report.status,
-          forwarded: forward? and reported && remote?(reported),
+          forwarded: (forward? and reported) && remote?(reported),
           blocked: block?,
           message: "report.created"
         })
@@ -97,12 +97,15 @@ defmodule HybridsocialWeb.Api.V1.ReportController do
     post_ap_id =
       if report.target_type == "post" do
         Hybridsocial.Repo.get(Hybridsocial.Social.Post, report.target_id) &&
-          (Hybridsocial.Repo.get(Hybridsocial.Social.Post, report.target_id).ap_id)
+          Hybridsocial.Repo.get(Hybridsocial.Social.Post, report.target_id).ap_id
       end
 
     inbox =
       cond do
-        ra = Hybridsocial.Repo.get_by(Hybridsocial.Federation.RemoteActor, ap_id: reported.ap_actor_url) ->
+        ra =
+            Hybridsocial.Repo.get_by(Hybridsocial.Federation.RemoteActor,
+              ap_id: reported.ap_actor_url
+            ) ->
           ra.shared_inbox_url || ra.inbox_url
 
         true ->

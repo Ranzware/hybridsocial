@@ -53,7 +53,8 @@ defmodule Hybridsocial.Moderation do
   — they still need moderator action. Returns the number of rows
   removed.
   """
-  def prune_closed_reports(retention_days) when is_integer(retention_days) and retention_days > 0 do
+  def prune_closed_reports(retention_days)
+      when is_integer(retention_days) and retention_days > 0 do
     cutoff = DateTime.add(DateTime.utc_now(), -retention_days * 86_400, :second)
 
     {n, _} =
@@ -522,7 +523,8 @@ defmodule Hybridsocial.Moderation do
   older than `retention_days` days. Pending appeals are never
   pruned — they still need admin action. Returns the row count.
   """
-  def prune_closed_appeals(retention_days) when is_integer(retention_days) and retention_days > 0 do
+  def prune_closed_appeals(retention_days)
+      when is_integer(retention_days) and retention_days > 0 do
     cutoff = DateTime.add(DateTime.utc_now(), -retention_days * 86_400, :second)
 
     {n, _} =
@@ -761,7 +763,9 @@ defmodule Hybridsocial.Moderation do
                 |> Hybridsocial.Mailer.deliver()
               rescue
                 e ->
-                  Logger.warning("moderation email failed for #{identity_id}: #{Exception.message(e)}")
+                  Logger.warning(
+                    "moderation email failed for #{identity_id}: #{Exception.message(e)}"
+                  )
               end
             end
 

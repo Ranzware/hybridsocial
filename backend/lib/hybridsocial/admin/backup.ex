@@ -329,8 +329,11 @@ defmodule Hybridsocial.Admin.Backup do
 
     try do
       case System.cmd("pg_restore", args, env: env, stderr_to_stdout: true) do
-        {_output, 0} -> :ok
-        {output, exit_code} -> {:error, {:pg_restore_failed, exit_code, String.slice(output, 0, 1000)}}
+        {_output, 0} ->
+          :ok
+
+        {output, exit_code} ->
+          {:error, {:pg_restore_failed, exit_code, String.slice(output, 0, 1000)}}
       end
     after
       File.rm(tmp)

@@ -52,13 +52,17 @@ defmodule Hybridsocial.Admin.BackupExpiryWorker do
 
   defp retention_days do
     case Config.get("backup_retention_days", @default_retention_days) do
-      n when is_integer(n) and n > 0 -> n
+      n when is_integer(n) and n > 0 ->
+        n
+
       n when is_binary(n) ->
         case Integer.parse(n) do
           {i, _} when i > 0 -> i
           _ -> @default_retention_days
         end
-      _ -> @default_retention_days
+
+      _ ->
+        @default_retention_days
     end
   end
 end

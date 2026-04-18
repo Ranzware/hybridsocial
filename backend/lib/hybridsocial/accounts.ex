@@ -87,7 +87,12 @@ defmodule Hybridsocial.Accounts do
               "admin_pending_account",
               "users.edit",
               fn to, staff_identity ->
-                Hybridsocial.Emails.admin_pending_account_email(to, staff_identity, identity, user)
+                Hybridsocial.Emails.admin_pending_account_email(
+                  to,
+                  staff_identity,
+                  identity,
+                  user
+                )
               end
             )
           end)
