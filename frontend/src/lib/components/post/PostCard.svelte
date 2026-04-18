@@ -895,6 +895,90 @@
     unicode-bidi: plaintext;
   }
 
+  /* Markdown structure styling. Posts use `white-space: pre-line`
+     above to preserve single-line breaks in plain paragraphs, but
+     block elements (tables, lists, headings, code blocks) need
+     their own spacing so they don't collapse into adjacent text. */
+  .post-content :global(h1),
+  .post-content :global(h2),
+  .post-content :global(h3) {
+    font-weight: 700;
+    line-height: 1.3;
+    margin-block: 0.8em 0.4em;
+  }
+  .post-content :global(h1) { font-size: 1.3em; }
+  .post-content :global(h2) { font-size: 1.2em; }
+  .post-content :global(h3) { font-size: 1.1em; }
+
+  .post-content :global(ul),
+  .post-content :global(ol) {
+    padding-inline-start: 1.5em;
+    margin-block: 0.4em;
+  }
+
+  .post-content :global(blockquote) {
+    border-inline-start: 3px solid var(--color-primary);
+    padding-inline-start: 0.8em;
+    margin-block: 0.5em;
+    color: var(--color-text-secondary);
+  }
+
+  .post-content :global(code) {
+    background: var(--color-surface);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.9em;
+  }
+
+  .post-content :global(pre) {
+    background: var(--color-surface);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin-block: 0.5em;
+  }
+  .post-content :global(pre code) {
+    background: transparent;
+    padding: 0;
+  }
+
+  .post-content :global(table) {
+    border-collapse: collapse;
+    margin-block: 0.8em;
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: normal;
+    font-size: 0.95em;
+  }
+  .post-content :global(th),
+  .post-content :global(td) {
+    border: 1px solid var(--color-border);
+    padding: 6px 10px;
+    text-align: start;
+    vertical-align: top;
+  }
+  .post-content :global(thead th) {
+    background: var(--color-surface);
+    font-weight: 600;
+  }
+  .post-content :global(tbody tr:nth-child(even)) {
+    background: var(--color-surface-container-low, var(--color-surface));
+  }
+
+  .post-content :global(img) {
+    max-width: 100%;
+    border-radius: 8px;
+    margin-block: 0.4em;
+  }
+
+  .post-content :global(hr) {
+    border: 0;
+    border-block-start: 1px solid var(--color-border);
+    margin-block: 1em;
+  }
+
   .post-content-collapsed {
     -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
     mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
