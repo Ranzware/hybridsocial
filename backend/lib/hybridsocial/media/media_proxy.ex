@@ -17,6 +17,8 @@ defmodule Hybridsocial.Media.MediaProxy do
   Convert a remote URL to a proxied URL with HMAC signature.
   Returns the original URL if media proxy is disabled or the URL is local.
   """
+  def url(nil), do: nil
+
   def url(remote_url) when is_binary(remote_url) do
     if enabled?() and not local_url?(remote_url) do
       # Prefer the isolated media origin (e.g. https://media.arab.place)
@@ -37,8 +39,6 @@ defmodule Hybridsocial.Media.MediaProxy do
       _ -> nil
     end
   end
-
-  def url(nil), do: nil
 
   @doc """
   Verify HMAC signature on a proxied URL.
