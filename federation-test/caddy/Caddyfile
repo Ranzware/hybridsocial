@@ -36,7 +36,7 @@ arab.place {
 	# SvelteKit (HTML) so remote peers verifying our HTTP
 	# signature couldn't fetch the instance actor's publicKeyPem,
 	# and relay Accept activities POSTed to /inbox got a 404.
-	@api path /api/* /.well-known/* /nodeinfo/* /actor /actor/* /inbox /outbox /users/* /actors/* /activities/* /oauth/* /media/* /uploads/* /posts/* /dm/*
+	@api path /api/* /.well-known/* /nodeinfo/* /actor /actor/* /inbox /outbox /users/* /actors/* /activities/* /oauth/* /media/* /uploads/* /proxy/media/* /posts/* /dm/*
 	handle @api {
 		reverse_proxy hs_backend:4000
 	}
