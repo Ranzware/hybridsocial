@@ -401,40 +401,68 @@
   }
 
   function handlePaste(e: ClipboardEvent) {
-    // When pasting rich text (HTML), extract plain text to preserve newlines
-    const html = e.clipboardData?.getData('text/html');
-    if (html) {
-      e.preventDefault();
-      // Convert <br>, <p>, <div> to newlines, strip all other HTML
-      let text = html
-        .replace(/<br\s*\/?>/gi, '\n')
-        .replace(/<\/p>/gi, '\n\n')
-        .replace(/<\/div>/gi, '\n')
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-
-      // Insert at cursor position
-      if (textareaEl) {
-        const start = textareaEl.selectionStart;
-        const end = textareaEl.selectionEnd;
-        content = content.substring(0, start) + text + content.substring(end);
-        setTimeout(() => {
-          if (textareaEl) {
-            const newPos = start + text.length;
-            textareaEl.selectionStart = newPos;
-            textareaEl.selectionEnd = newPos;
-            autoGrow();
-          }
-        }, 0);
-      }
+    // Prefer text/plain when available. For a user copying markdown
+    // source, this is what preserves their pipes, emoji, newlines, etc.
+    // Only fall back to parsing text/html when the plain version is
+    // missing (rare — usually happens for drag-drop from Office-y apps).
+    const plain = e.clipboardData?.getData('text/plain');
+    if (plain && plain.trim().length > 0) {
+      // Let the browser insert text/plain natively; it handles the
+      // cursor placement and auto-scroll correctly without us having
+      // to re-implement any of it.
+      return;
     }
-    // Plain text paste is handled natively by the textarea
+
+    const html = e.clipboardData?.getData('text/html');
+    if (!html) return;
+
+    e.preventDefault();
+    // Extract text from HTML, preserving as much structure as a plain
+    // textarea can show:
+    //   * <table> rows become newline-separated, cells joined with " | "
+    //   * <img alt="…"> becomes its alt text (emoji as <img>)
+    //   * <br>, </p>, </div>, </li> become line breaks
+    //   * everything else gets tag-stripped
+    let text = html
+      // Table cells → " | " separators, rows → newlines.
+      .replace(/<\/(th|td)>\s*<(th|td)[^>]*>/gi, ' | ')
+      .replace(/<\/tr>\s*<tr[^>]*>/gi, '\n')
+      .replace(/<t(?:head|body|r|h|d)[^>]*>/gi, '')
+      .replace(/<\/t(?:head|body|r|h|d)>/gi, '')
+      .replace(/<\/table>/gi, '\n')
+      // Preserve image alt text (Gemini/ChatGPT render emoji as <img>).
+      .replace(/<img[^>]*alt="([^"]*)"[^>]*>/gi, '$1')
+      .replace(/<img\b[^>]*>/gi, '')
+      // Block-level → newlines.
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+      // Strip remaining tags.
+      .replace(/<[^>]+>/g, '')
+      // Decode common entities last, so text like "&lt;div&gt;" doesn't
+      // get re-swept by the tag stripper above.
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    if (textareaEl) {
+      const start = textareaEl.selectionStart;
+      const end = textareaEl.selectionEnd;
+      content = content.substring(0, start) + text + content.substring(end);
+      setTimeout(() => {
+        if (textareaEl) {
+          const newPos = start + text.length;
+          textareaEl.selectionStart = newPos;
+          textareaEl.selectionEnd = newPos;
+          autoGrow();
+        }
+      }, 0);
+    }
   }
 
   function detectMention() {
