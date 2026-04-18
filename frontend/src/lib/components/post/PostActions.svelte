@@ -84,6 +84,18 @@
   let reportDescription = $state('');
   let reportSubmitting = $state(false);
   let reportError = $state('');
+  let reportStep = $state<1 | 2>(1);
+  let reportBlock = $state(false);
+  let reportForward = $state(false);
+
+  // Whether the reported account lives on another instance.
+  // acct contains "@host" for remote; local accts are bare.
+  let reportIsRemote = $derived(
+    !!(post.account as any)?.acct && (post.account as any).acct.includes('@')
+  );
+  let reportRemoteDomain = $derived(
+    reportIsRemote ? ((post.account as any).acct.split('@')[1] || '') : ''
+  );
 
   const reportCategories = [
     { value: 'spam', label: 'Spam' },
@@ -267,7 +279,21 @@
     reportCategory = 'spam';
     reportDescription = '';
     reportError = '';
+    reportStep = 1;
+    reportBlock = false;
+    // For remote accounts default forwarding ON — the origin
+    // instance is in the best position to act on it.
+    reportForward = reportIsRemote;
     showReportModal = true;
+  }
+
+  function reportNext() {
+    reportError = '';
+    reportStep = 2;
+  }
+
+  function reportBack() {
+    reportStep = 1;
   }
 
   async function submitReport() {
@@ -280,6 +306,8 @@
         target_id: post.id,
         category: reportCategory,
         description: reportDescription,
+        block_account: reportBlock,
+        forward: reportIsRemote && reportForward,
       });
       showReportModal = false;
     } catch {
@@ -630,37 +658,79 @@
 {#if showReportModal}
   <div class="dialog-overlay" onclick={cancelReport} role="dialog" aria-modal="true" aria-label="Report post">
     <div class="dialog-panel" onclick={(e) => e.stopPropagation()}>
-      <h3 class="dialog-title">Report post</h3>
-      <p class="dialog-message">Why are you reporting this post?</p>
+      {#if reportStep === 1}
+        <h3 class="dialog-title">Report post — step 1 of 2</h3>
+        <p class="dialog-message">Why are you reporting this post?</p>
 
-      <div class="report-form">
-        <label class="report-label" for="report-category">Category</label>
-        <select id="report-category" class="report-select" bind:value={reportCategory}>
-          {#each reportCategories as cat (cat.value)}
-            <option value={cat.value}>{cat.label}</option>
-          {/each}
-        </select>
+        <div class="report-form">
+          <label class="report-label" for="report-category">Category</label>
+          <select id="report-category" class="report-select" bind:value={reportCategory}>
+            {#each reportCategories as cat (cat.value)}
+              <option value={cat.value}>{cat.label}</option>
+            {/each}
+          </select>
 
-        <label class="report-label" for="report-description">Description (optional)</label>
-        <textarea
-          id="report-description"
-          class="report-textarea"
-          bind:value={reportDescription}
-          placeholder="Provide additional details..."
-          rows="3"
-        ></textarea>
+          <label class="report-label" for="report-description">Description <span class="report-optional">(optional)</span></label>
+          <textarea
+            id="report-description"
+            class="report-textarea"
+            bind:value={reportDescription}
+            placeholder="Give moderators context — what's wrong with this post, and anything they should know before acting on it."
+            rows="4"
+          ></textarea>
+
+          {#if reportError}
+            <p class="report-error">{reportError}</p>
+          {/if}
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" class="dialog-cancel" onclick={cancelReport}>Cancel</button>
+          <button type="button" class="dialog-confirm" onclick={reportNext}>
+            Next
+          </button>
+        </div>
+
+      {:else}
+        <h3 class="dialog-title">Report post — step 2 of 2</h3>
+
+        {#if reportIsRemote}
+          <div class="report-remote-notice" role="note">
+            <span class="material-symbols-outlined" aria-hidden="true">public</span>
+            <div>
+              <strong>This account is hosted at <code>{reportRemoteDomain}</code>.</strong>
+              Our moderators can still act on your report locally (hide the post, block the account here), but the account's home instance has more authority over it.
+            </div>
+          </div>
+
+          <label class="report-checkbox">
+            <input type="checkbox" bind:checked={reportForward} />
+            <span>
+              <strong>Send a copy of this report to <code>{reportRemoteDomain}</code>.</strong>
+              <span class="report-hint">Their admins decide what happens to the account on their end.</span>
+            </span>
+          </label>
+        {/if}
+
+        <label class="report-checkbox">
+          <input type="checkbox" bind:checked={reportBlock} />
+          <span>
+            <strong>Block @{(post.account as any)?.acct || post.account?.handle}</strong>
+            <span class="report-hint">You'll stop seeing their posts, and they won't see yours. You can undo this from their profile.</span>
+          </span>
+        </label>
 
         {#if reportError}
           <p class="report-error">{reportError}</p>
         {/if}
-      </div>
 
-      <div class="dialog-actions">
-        <button type="button" class="dialog-cancel" onclick={cancelReport}>Cancel</button>
-        <button type="button" class="dialog-confirm-danger" onclick={submitReport} disabled={reportSubmitting}>
-          {reportSubmitting ? 'Submitting...' : 'Submit report'}
-        </button>
-      </div>
+        <div class="dialog-actions">
+          <button type="button" class="dialog-cancel" onclick={reportBack} disabled={reportSubmitting}>Back</button>
+          <button type="button" class="dialog-confirm-danger" onclick={submitReport} disabled={reportSubmitting}>
+            {reportSubmitting ? 'Submitting…' : 'Submit report'}
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}
@@ -1470,5 +1540,82 @@
   .report-error {
     font-size: 0.875rem;
     color: var(--color-danger);
+  }
+
+  .report-optional {
+    color: var(--color-text-tertiary);
+    font-weight: 400;
+  }
+
+  .report-remote-notice {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--color-primary-soft);
+    color: var(--color-text);
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin-block-end: 16px;
+  }
+
+  .report-remote-notice :global(.material-symbols-outlined) {
+    color: var(--color-primary);
+    font-size: 20px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .report-remote-notice code {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.06);
+  }
+
+  .report-checkbox {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    margin-block-end: 10px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+
+  .report-checkbox:hover {
+    background: var(--color-surface);
+  }
+
+  .report-checkbox input[type="checkbox"] {
+    margin-top: 3px;
+    flex-shrink: 0;
+  }
+
+  .report-checkbox strong {
+    display: block;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: var(--color-text);
+  }
+
+  .report-checkbox code {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.8em;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--color-surface);
+  }
+
+  .report-hint {
+    display: block;
+    font-size: 0.8125rem;
+    color: var(--color-text-secondary);
+    margin-block-start: 2px;
+    font-weight: 400;
   }
 </style>

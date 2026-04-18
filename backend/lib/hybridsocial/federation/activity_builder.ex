@@ -189,6 +189,39 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
     }
   end
 
+  # --- Flag (report forwarding) ---
+
+  @doc """
+  Build a Flag activity for an ActivityPub report forward. Signed
+  with the instance actor (reports are instance-to-instance, not
+  user-to-user — the reporter's identity stays out of the payload
+  per Mastodon convention).
+
+  `object` is a list of the reported account AP id plus the
+  reported post AP id (when present). `content` carries the
+  reporter's description. `to` is the reported actor so their
+  inbox can route correctly.
+  """
+  def build_flag(report, reported_actor_ap_id, post_ap_id \\ nil) do
+    alias Hybridsocial.Federation.InstanceActor
+
+    objects =
+      [reported_actor_ap_id, post_ap_id]
+      |> Enum.reject(&is_nil/1)
+
+    base = HybridsocialWeb.Endpoint.url()
+
+    %{
+      "@context" => @context,
+      "id" => "#{base}/flags/#{report.id}",
+      "type" => "Flag",
+      "actor" => InstanceActor.ap_id(),
+      "object" => objects,
+      "content" => report.description || "",
+      "to" => [reported_actor_ap_id]
+    }
+  end
+
   # --- Block ---
 
   def build_block(identity, target_ap_id) do
