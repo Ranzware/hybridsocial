@@ -657,7 +657,17 @@
 
 {#if showReportModal}
   <div class="dialog-overlay" onclick={cancelReport} role="dialog" aria-modal="true" aria-label="Report post">
-    <div class="dialog-panel" onclick={(e) => e.stopPropagation()}>
+    <div class="dialog-panel report-panel" onclick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        class="report-close"
+        onclick={cancelReport}
+        aria-label="Close without reporting"
+        title="Close without reporting"
+      >
+        <span class="material-symbols-outlined">close</span>
+      </button>
+
       {#if reportStep === 1}
         <h3 class="dialog-title">Report post — step 1 of 2</h3>
         <p class="dialog-message">Why are you reporting this post?</p>
@@ -1617,5 +1627,38 @@
     color: var(--color-text-secondary);
     margin-block-start: 2px;
     font-weight: 400;
+  }
+
+  /* Report dialog gets some top padding so the absolute-positioned
+     close button doesn't crowd the title. */
+  .report-panel {
+    position: relative;
+    padding-block-start: 44px;
+  }
+
+  .report-close {
+    position: absolute;
+    top: 10px;
+    inset-inline-end: 10px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    border-radius: 9999px;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .report-close:hover {
+    background: var(--color-surface);
+    color: var(--color-text);
+  }
+
+  .report-close :global(.material-symbols-outlined) {
+    font-size: 20px;
   }
 </style>
