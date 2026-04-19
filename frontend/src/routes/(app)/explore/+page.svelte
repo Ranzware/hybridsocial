@@ -183,19 +183,18 @@
     }, 400);
   }
 
-  // Track at-top reactively so the queue auto-merges as soon as the
-  // user scrolls back into view — matches the home-page behaviour.
+  // Auto-merge only on transition from scrolled-down → at-top. See
+  // the home page for why this isn't a plain `$effect` on count.
   let atTopState = $state(true);
+  let prevAtTop = true;
   function handleScroll() {
     atTopState = window.scrollY < 50;
     setAtTop(atTopState);
-  }
-
-  $effect(() => {
-    if (atTopState && $queuedCount > 0) {
+    if (atTopState && !prevAtTop) {
       mergeQueuedPosts();
     }
-  });
+    prevAtTop = atTopState;
+  }
 
   // Mirror the home-timeline / profile-page pattern so submitting a
   // post appears on the Local/Global tab immediately (as a washed-out

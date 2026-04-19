@@ -29,6 +29,12 @@ export const isStreamConnected = derived(state, ($s) => $s.connected);
 let eventSource: EventSource | null = null;
 let isAtTop = true;
 let currentFilter: ((post: Post) => boolean) | null = null;
+// Tracks the last (kind + filter) we connected with, so we only reset
+// the queue when the stream's audience actually changes (e.g. explore
+// tab switching Local ↔ Global). A plain reconnect preserves queued
+// posts — otherwise a route re-mount or HMR silently resets the count
+// back to 0 and the pill never increments past 1.
+let currentStreamSig: string | null = null;
 
 export function setAtTop(atTop: boolean) {
   isAtTop = atTop;
@@ -72,13 +78,24 @@ export function connectStream(
   options: ConnectOptions = {}
 ): void {
   if (!browser) return;
-  disconnectStream();
 
+  const sig = kind + ':' + (options.filter ? 'filtered' : 'unfiltered');
+
+  // Same (kind + filter) signature → this is a plain reconnect; keep
+  // the queue intact so counts accumulate across reconnects.
+  // Different signature → the audience changed (e.g. Local → Global
+  // on explore); reset the queue so stale posts don't appear.
+  const audienceChanged = currentStreamSig !== null && currentStreamSig !== sig;
+
+  disconnectStream();
   currentFilter = options.filter ?? null;
-  // Reset queue so counts from a previous stream don't leak into the
-  // new one — otherwise switching from Global → Local would inherit
-  // remote posts the user explicitly filtered out.
-  state.set({ queued: [], connected: false });
+  currentStreamSig = sig;
+
+  if (audienceChanged) {
+    state.set({ queued: [], connected: false });
+  } else {
+    state.update((s) => ({ ...s, connected: false }));
+  }
 
   try {
     const path =

@@ -85,20 +85,23 @@
     }, 400);
   }
 
-  // Track "at-top" reactively so an effect can auto-merge the queue
-  // the moment the user scrolls back into view — no need to click
-  // the banner if they've already come back to the top organically.
+  // Auto-merge the queue only on the TRANSITION from scrolled-down
+  // to at-top. Watching $queuedCount directly would flush the queue
+  // on every count tick as long as the user is at top, which would
+  // swallow a pill that briefly appears mid-post (e.g., if optimistic
+  // insert + scroll anchor briefly puts the viewport at scrollY=0
+  // during a post). Transition-only keeps the pill's counter behaviour
+  // sane while still dismissing it when the user scrolls back up.
   let atTopState = $state(true);
+  let prevAtTop = true;
   function handleScroll() {
     atTopState = window.scrollY < 50;
     setAtTop(atTopState);
-  }
-
-  $effect(() => {
-    if (atTopState && $queuedCount > 0) {
+    if (atTopState && !prevAtTop) {
       mergeQueuedPosts();
     }
-  });
+    prevAtTop = atTopState;
+  }
 
   onMount(() => {
     loadTimeline(true);
