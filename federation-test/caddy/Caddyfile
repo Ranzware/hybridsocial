@@ -69,6 +69,11 @@ arab.place {
 # Separate origin for user uploads — keeps cookies + scripts off the
 # media path so a hostile upload can't piggyback on the main site.
 media.arab.place {
+	# CORS for user uploads. The main site (arab.place) needs to
+	# fetch() audio attachments from this origin to generate the
+	# waveform visualization in the Web Audio API. Cross-origin
+	# GET of an <img>/<audio> element works without CORS (opaque
+	# response); decoding the bytes in JS does not.
 	header {
 		X-Content-Type-Options nosniff
 		Content-Security-Policy "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'"
@@ -77,24 +82,17 @@ media.arab.place {
 		-Set-Cookie
 	}
 
-	# CORS for user uploads. The main site (arab.place) needs to
-	# fetch() audio attachments from this origin to generate the
-	# waveform visualization in the Web Audio API. Cross-origin
-	# GET of an <img>/<audio> element works without CORS (opaque
-	# response); decoding the bytes in JS does not.
-	@cors_allowed header Origin https://arab.place
-	header @cors_allowed {
-		Access-Control-Allow-Origin https://arab.place
-		Access-Control-Allow-Methods GET
-		Access-Control-Max-Age 86400
-		Vary Origin
-	}
-
 	handle /uploads/* {
+		header Access-Control-Allow-Origin "https://arab.place"
+		header Access-Control-Allow-Methods "GET"
+		header Vary "Origin"
 		reverse_proxy hs_backend:4000
 	}
 
 	handle /proxy/media/* {
+		header Access-Control-Allow-Origin "https://arab.place"
+		header Access-Control-Allow-Methods "GET"
+		header Vary "Origin"
 		reverse_proxy hs_backend:4000
 	}
 
