@@ -468,7 +468,7 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   @theme_keys ~w(
     color_primary color_primary_hover color_primary_soft color_primary_contrast
     color_secondary color_accent color_success color_warning color_danger color_info
-    color_bg color_surface color_border color_text color_text_secondary color_text_link
+    color_bg color_bg_wash color_surface color_border color_text color_text_secondary color_text_link
     gradient_start gradient_end gradient_direction border_radius density font_family
     logo_url favicon_url
   )

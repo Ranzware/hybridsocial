@@ -20,6 +20,7 @@ const PROPERTY_MAP: Record<string, string[]> = {
   color_danger: ['--color-danger', '--color-error'],
   color_info: ['--color-info'],
   color_bg: ['--color-bg', '--color-background'],
+  color_bg_wash: ['--color-bg-wash'],
   color_surface: ['--color-surface'],
   color_border: ['--color-border'],
   color_text: ['--color-text'],

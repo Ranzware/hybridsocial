@@ -17,6 +17,7 @@
     color_danger: '#ef4444',
     color_info: '#3b82f6',
     color_bg: '#ffffff',
+    color_bg_wash: '#dafff9',
     color_surface: '#f8fafc',
     color_border: '#e2e8f0',
     color_text: '#0f172a',
@@ -74,6 +75,7 @@
       title: 'Surfaces',
       colors: [
         { key: 'color_bg', label: 'Background' },
+        { key: 'color_bg_wash', label: 'Background wash' },
         { key: 'color_surface', label: 'Surface' },
         { key: 'color_border', label: 'Border' }
       ]

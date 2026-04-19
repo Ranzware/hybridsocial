@@ -25,6 +25,11 @@
 
   /* Surfaces */
   --color-background: #f8fafb;
+  /* Mint wash that sits in the body radial gradient — admin-editable
+     via the theme page (color_bg_wash → --color-bg-wash). Lighter
+     than the previous #a5fff5 so it reads as a subtle atmospheric
+     tint rather than a coloured spotlight. */
+  --color-bg-wash: #dafff9;
   --color-surface: #f8fafb;
   --color-surface-container-lowest: #ffffff;
   --color-surface-container-low: #f2f4f5;
@@ -152,19 +157,20 @@ html {
 
 body {
   min-height: 100vh;
-  /* Soft mint wash radiating from the lower-center of the viewport
-     so the page doesn't read as pure white. The radial center sits
-     at y=90% (near the bottom) with the gradient fading to
-     transparent by ~70% of the radius — keeps the top of the page
-     clean for content while adding subtle life below. Fixed
-     attachment so the wash stays anchored to the viewport instead
-     of scrolling with the feed. */
+  /* Soft wash radiating from the lower-center of the viewport so the
+     page doesn't read as pure white. The radial centre sits at y=90%
+     (near the bottom) with the gradient fading to transparent by
+     ~70% of the radius — keeps the top of the page clean for content
+     while adding subtle life below. Fixed attachment so the wash
+     stays anchored to the viewport instead of scrolling with the
+     feed. Colour is driven by --color-bg-wash which is admin-editable
+     from /admin/theme. */
   background:
     radial-gradient(
       circle at 50% 90%,
-      #a5fff5 0%,
-      rgba(165, 255, 245, 0.55) 20%,
-      rgba(165, 255, 245, 0) 70%
+      var(--color-bg-wash) 0%,
+      color-mix(in oklab, var(--color-bg-wash) 55%, transparent) 20%,
+      transparent 70%
     ),
     var(--color-background);
   background-attachment: fixed;

@@ -330,6 +330,9 @@ export interface ThemeConfig {
   color_danger?: string;
   color_info?: string;
   color_bg?: string;
+  // Lower-center radial wash applied to body. Admin-editable from the
+  // theme page. Omitting means the CSS default (#dafff9) applies.
+  color_bg_wash?: string;
   color_surface?: string;
   color_border?: string;
   color_text?: string;
@@ -748,6 +751,7 @@ export interface AdminThemeConfig {
   color_danger: string;
   color_info: string;
   color_bg: string;
+  color_bg_wash: string;
   color_surface: string;
   color_border: string;
   color_text: string;
