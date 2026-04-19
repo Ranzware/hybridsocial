@@ -36,7 +36,17 @@ let currentFilter: ((post: Post) => boolean) | null = null;
 // back to 0 and the pill never increments past 1.
 let currentStreamSig: string | null = null;
 
+// Flip `window.__tlDebug = true` in devtools to see stream events,
+// queue mutations, and at-top transitions. Off by default in prod.
+function dlog(...args: unknown[]) {
+  if (typeof window !== 'undefined' && (window as any).__tlDebug) {
+    // eslint-disable-next-line no-console
+    console.log('[timeline-stream]', ...args);
+  }
+}
+
 export function setAtTop(atTop: boolean) {
+  if (isAtTop !== atTop) dlog('setAtTop', atTop);
   isAtTop = atTop;
 }
 
@@ -50,6 +60,7 @@ export function flushQueue(): Post[] {
     flushed = s.queued;
     return { ...s, queued: [] };
   });
+  dlog('flushQueue', { count: flushed.length });
   return flushed;
 }
 
@@ -101,6 +112,7 @@ export function connectStream(
     const path =
       kind === 'home' ? '/api/v1/streaming/user?stream=home' : '/api/v1/streaming/public';
     const url = `${apiBase}${path}`;
+    dlog('connect', { kind, sig, audienceChanged });
     eventSource = new EventSource(url, { withCredentials: true });
 
     state.update((s) => ({ ...s, connected: true }));
@@ -108,7 +120,11 @@ export function connectStream(
     eventSource.addEventListener('update', (event) => {
       try {
         const post: Post = JSON.parse(event.data);
-        if (currentFilter && !currentFilter(post)) return;
+        dlog('update recv', { id: post.id, isAtTop });
+        if (currentFilter && !currentFilter(post)) {
+          dlog('update filtered out', post.id);
+          return;
+        }
 
         if (isAtTop) {
           window.dispatchEvent(new CustomEvent('timeline-update', { detail: post }));
@@ -116,13 +132,17 @@ export function connectStream(
           state.update((s) => {
             // Avoid duplicate queueing if the backend fanout delivers
             // a post twice (rare, e.g. author + follower broadcast).
-            if (s.queued.some((p) => p.id === post.id)) return s;
+            if (s.queued.some((p) => p.id === post.id)) {
+              dlog('queue dedup skip', post.id);
+              return s;
+            }
             const queued = [post, ...s.queued].slice(0, MAX_QUEUE_SIZE);
+            dlog('queue push', { id: post.id, size: queued.length });
             return { ...s, queued };
           });
         }
-      } catch {
-        // Ignore malformed events
+      } catch (err) {
+        dlog('update parse error', err);
       }
     });
 

@@ -165,6 +165,13 @@
     window.addEventListener('new-post', handleNewPost);
     window.addEventListener('post-replace', handlePostReplace);
 
+    // Seed at-top state. Without this, the module-level `isAtTop`
+    // defaults to `true` even when the page loads already scrolled
+    // down (e.g. scroll restoration after a client-side nav), which
+    // routes every stream event to the in-feed path instead of the
+    // "N new posts" queue until the user happens to scroll.
+    handleScroll();
+
     return () => {
       disconnectTimelineStream();
       window.removeEventListener('scroll', handleScroll);
