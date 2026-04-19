@@ -35,6 +35,19 @@
   let animPhase = 0;
   let lastFrameTs = 0;
 
+  // Live-analysis graph. Wired lazily on first play so we don't
+  // create an AudioContext before a user gesture (Chrome blocks
+  // autoplay contexts otherwise). MediaElementSource can only be
+  // constructed ONCE per element, so we keep the handles around.
+  let liveCtx: AudioContext | null = null;
+  let liveAnalyser: AnalyserNode | null = null;
+  let liveData: Uint8Array | null = null;
+  // Low-passed version of the analyser data so strand heights don't
+  // twitch frame-to-frame. Each bin decays toward the raw value with
+  // a weight, giving a smoothed shimmer instead of a hard-edge
+  // equalizer bounce.
+  let liveSmooth: Float32Array | null = null;
+
   async function loadWaveform() {
     if (!media.url) return;
     try {
@@ -73,8 +86,23 @@
     }
   }
 
+  // Pull a fresh frame of live frequency data into `liveSmooth`,
+  // applying exponential smoothing so bins don't flicker. Returns
+  // the buffer (length = analyser.frequencyBinCount) or null if the
+  // graph isn't wired yet.
+  function sampleLive(): Float32Array | null {
+    if (!liveAnalyser || !liveData || !liveSmooth) return null;
+    liveAnalyser.getByteFrequencyData(liveData);
+    const a = 0.32; // new-sample weight; lower = smoother, laggier
+    for (let i = 0; i < liveSmooth.length; i++) {
+      const v = liveData[i] / 255;
+      liveSmooth[i] = liveSmooth[i] * (1 - a) + v * a;
+    }
+    return liveSmooth;
+  }
+
   function drawWaveform() {
-    if (!canvasEl || peaks.length === 0) return;
+    if (!canvasEl) return;
     const dpr = window.devicePixelRatio || 1;
     const rect = canvasEl.getBoundingClientRect();
     const w = rect.width;
@@ -87,52 +115,94 @@
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
+    // Prefer live analyser data when playing; fall back to the
+    // pre-decoded envelope (peaks) otherwise. This gives a real-
+    // time EQ-style shimmer during playback and a clean
+    // full-track silhouette when idle.
+    const live = playing ? sampleLive() : null;
+    const envelope = live ?? Float32Array.from(peaks);
+    if (envelope.length === 0) return;
+
     const progress = duration > 0 ? currentTime / duration : 0;
     const splitX = w * progress;
 
-    const stepX = w / peaks.length;
-    const midY = h / 2;
+    const stepX = w / envelope.length;
+    // Single-sided: strands rise UP from the bottom, like blades
+    // of grass driven by the signal. Leave a 4px padding at top
+    // and 2px at bottom so the strokes don't clip.
+    const baseY = h - 2;
+    const maxHeight = h - 6;
 
-    // N strands, each with its own phase shift + slight frequency
-    // variation. When the track is playing, animPhase advances each
-    // frame so the strands shimmer. When paused it holds still so
-    // the user can see the envelope cleanly.
     for (let s = 0; s < STRAND_COUNT; s++) {
       const strandFrac = s / (STRAND_COUNT - 1 || 1);
-      const strandScale = 0.45 + 0.55 * strandFrac;
+      // Taller strands at the back, shorter in front, creates the
+      // layered "multiple strands" depth without mirroring.
+      const strandScale = 0.4 + 0.6 * strandFrac;
       const strandFreq = 0.18 + 0.08 * strandFrac;
       const strandPhase = strandFrac * Math.PI * 2 + animPhase * (0.8 + strandFrac * 0.6);
 
       ctx.lineWidth = 1;
       ctx.beginPath();
-      for (let i = 0; i < peaks.length; i++) {
+      for (let i = 0; i < envelope.length; i++) {
         const x = i * stepX;
         const jitter = Math.sin(i * strandFreq + strandPhase) * 1.2;
-        const amp = peaks[i] * (midY - 4) * strandScale;
-        const y = midY + jitter - amp;
+        const mag = Math.max(0.04, envelope[i]);
+        const amp = mag * maxHeight * strandScale;
+        const y = baseY - amp + jitter;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      for (let i = peaks.length - 1; i >= 0; i--) {
-        const x = i * stepX;
-        const jitter = Math.sin(i * strandFreq + strandPhase) * 1.2;
-        const amp = peaks[i] * (midY - 4) * strandScale;
-        const y = midY + jitter + amp;
-        ctx.lineTo(x, y);
-      }
-      ctx.closePath();
-
       const grad = ctx.createLinearGradient(0, 0, w, 0);
-      grad.addColorStop(0, `rgba(23, 67, 85, ${0.16 + strandFrac * 0.14})`);
-      grad.addColorStop(1, `rgba(97, 226, 255, ${0.22 + strandFrac * 0.2})`);
+      grad.addColorStop(0, `rgba(23, 67, 85, ${0.35 + strandFrac * 0.25})`);
+      grad.addColorStop(1, `rgba(97, 226, 255, ${0.45 + strandFrac * 0.35})`);
       ctx.strokeStyle = grad;
       ctx.stroke();
     }
 
-    // Played-region brighten overlay.
+    // Played-region brighten overlay. Keep it visible in both live
+    // and idle modes so the user always has a sense of position.
     if (splitX > 0) {
-      ctx.fillStyle = 'rgba(97, 226, 255, 0.06)';
+      ctx.fillStyle = 'rgba(97, 226, 255, 0.08)';
       ctx.fillRect(0, 0, splitX, h);
+    }
+  }
+
+  // Lazily build the live-analysis graph on first play. Must run
+  // from a user-gesture stack (the click that called .play()),
+  // otherwise the AudioContext starts suspended and stays that
+  // way. MediaElementSource can only be attached ONCE per
+  // <audio> element, so we stash the handles and reuse them on
+  // every subsequent play.
+  function ensureLiveGraph() {
+    if (liveAnalyser) return;
+    if (!audioEl) return;
+    const Ctx = (window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext) as
+      | typeof AudioContext
+      | undefined;
+    if (!Ctx) return;
+    try {
+      liveCtx = new Ctx();
+      const src = liveCtx.createMediaElementSource(audioEl);
+      liveAnalyser = liveCtx.createAnalyser();
+      liveAnalyser.fftSize = 512;
+      liveAnalyser.smoothingTimeConstant = 0.6;
+      // Source → analyser → destination. Without the destination
+      // hop, playback would be silent because we've intercepted
+      // the element's default output.
+      src.connect(liveAnalyser);
+      liveAnalyser.connect(liveCtx.destination);
+      liveData = new Uint8Array(liveAnalyser.frequencyBinCount);
+      liveSmooth = new Float32Array(liveAnalyser.frequencyBinCount);
+    } catch {
+      // MediaElementSource failed (CORS taint, or already-
+      // connected element on HMR). Fall back to the static
+      // pre-decoded envelope — the player still plays audio,
+      // it just won't shimmer to the live signal.
+      liveCtx = null;
+      liveAnalyser = null;
+      liveData = null;
+      liveSmooth = null;
     }
   }
 
@@ -163,6 +233,11 @@
 
   function onPlay() {
     playing = true;
+    ensureLiveGraph();
+    // Resume if the context was suspended (page backgrounded, etc).
+    if (liveCtx && liveCtx.state === 'suspended') {
+      void liveCtx.resume();
+    }
     startAnim();
   }
 
@@ -245,6 +320,16 @@
   onDestroy(() => {
     resizeObs?.disconnect();
     stopAnim();
+    // Tear the live graph down — leaving an AudioContext running
+    // after the component unmounts leaks memory + keeps the tab's
+    // audio indicator on.
+    if (liveCtx) {
+      try { void liveCtx.close(); } catch { /* ignore */ }
+      liveCtx = null;
+      liveAnalyser = null;
+      liveData = null;
+      liveSmooth = null;
+    }
   });
 
   let displayName = $derived(author?.display_name || author?.handle || 'Unknown');
