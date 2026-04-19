@@ -225,6 +225,7 @@
     bind:this={audioEl}
     src={media.url}
     preload="metadata"
+    crossorigin="anonymous"
     onplay={() => (playing = true)}
     onpause={() => (playing = false)}
     onended={() => (playing = false)}
