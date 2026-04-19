@@ -5,6 +5,7 @@
     trustDomain,
     isWarningDisabled,
   } from '$lib/utils/external-link-trust.js';
+  import SafeUrl from './SafeUrl.svelte';
 
   let pendingUrl = $state<string | null>(null);
   let pendingDomain = $state<string>('');
@@ -151,8 +152,7 @@
       </p>
 
       <div id="elw-url" class="elw-url">
-        <span class="elw-domain">{pendingDomain}</span>
-        <span class="elw-fullurl">{pendingUrl}</span>
+        <SafeUrl url={pendingUrl} />
       </div>
 
       <label class="elw-trust">
@@ -170,7 +170,7 @@
           Cancel
         </button>
         <button type="button" class="elw-btn elw-btn-primary" onclick={handleContinue}>
-          Continue to {pendingDomain}
+          Continue
         </button>
       </div>
     </div>
@@ -181,7 +181,13 @@
   .elw-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    /* Blur the background so the foreground modal is obviously the
+       thing in focus — matches the connection/session-expired dialog
+       we ship elsewhere. Fall back to a plain dim on old browsers
+       that don't support backdrop-filter. */
+    background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -224,19 +230,6 @@
     flex-direction: column;
     gap: 4px;
     overflow: hidden;
-  }
-
-  .elw-domain {
-    font-weight: 700;
-    font-size: 1rem;
-    word-break: break-all;
-  }
-
-  .elw-fullurl {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: var(--text-xs, 0.75rem);
-    color: var(--color-text-tertiary);
-    word-break: break-all;
   }
 
   .elw-trust {
