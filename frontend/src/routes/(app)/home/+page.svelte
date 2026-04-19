@@ -134,14 +134,22 @@
 
 <div class="home-page">
   <StoriesCarousel />
-  <FeedToggle active={feedType} onchange={handleFeedChange} />
 
-  {#if $queuedCount > 0}
-    <button type="button" class="new-posts-banner" onclick={mergeQueuedPosts}>
-      <span class="material-symbols-outlined banner-icon">arrow_upward</span>
-      {$queuedCount} new {$queuedCount === 1 ? 'post' : 'posts'}
-    </button>
-  {/if}
+  <!-- Sticky feed-type tabs. Keeping them pinned so a user scrolling
+       deep into "Latest" can switch to "For You" / "Top" without
+       scrolling back to the top of the viewport. The `background`
+       + slight blur makes the list behind it fade instead of
+       showing through distractingly. -->
+  <div class="home-sticky-bar">
+    <FeedToggle active={feedType} onchange={handleFeedChange} />
+
+    {#if $queuedCount > 0}
+      <button type="button" class="new-posts-banner" onclick={mergeQueuedPosts}>
+        <span class="material-symbols-outlined banner-icon">arrow_upward</span>
+        {$queuedCount} new {$queuedCount === 1 ? 'post' : 'posts'}
+      </button>
+    {/if}
+  </div>
 
   <FeedList
     {posts}
@@ -159,6 +167,26 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
+  }
+
+  .home-sticky-bar {
+    position: sticky;
+    /* Header is pinned at 0 with height --header-height. Stick the
+       tabs right under it so they hug the bottom edge of the
+       header as the user scrolls. */
+    inset-block-start: var(--header-height);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    /* Translucent surface + blur so the posts scrolling under the
+       bar look dimmed rather than obscured by a hard edge. */
+    background: color-mix(in oklab, var(--color-surface-base, #fff) 85%, transparent);
+    backdrop-filter: saturate(1.4) blur(10px);
+    -webkit-backdrop-filter: saturate(1.4) blur(10px);
+    padding: var(--space-3) 0;
+    margin-inline: calc(-1 * var(--space-2));
+    padding-inline: var(--space-2);
   }
 
   .new-posts-banner {

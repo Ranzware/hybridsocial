@@ -294,8 +294,10 @@
       {/if}
     </Tabs>
   {:else}
-    <!-- Explore tabs: Local / Global / Trending -->
-    <div class="explore-tabs" role="tablist" aria-label="Explore feeds">
+    <!-- Explore tabs: Local / Global / Trending. Sticky so users
+         deep-scrolling a long timeline can switch feeds without
+         scrolling back up. -->
+    <div class="explore-tabs explore-tabs-sticky" role="tablist" aria-label="Explore feeds">
       <button
         type="button"
         role="tab"
@@ -543,6 +545,21 @@
     border: 1px solid var(--color-border);
     border-radius: 14px;
     padding: 3px;
+  }
+
+  /* Pin the Local / Global / Trending switcher under the site
+     header so tab changes don't force a scroll-to-top. Slight
+     blur + translucent fill so the posts scrolling underneath
+     fade out visually instead of being abruptly hidden. Inset
+     margin keeps the sticky element inside the same horizontal
+     gutters as the page body. */
+  .explore-tabs-sticky {
+    position: sticky;
+    inset-block-start: var(--header-height);
+    z-index: 20;
+    background: color-mix(in oklab, var(--color-surface-container-lowest) 85%, transparent);
+    backdrop-filter: saturate(1.4) blur(10px);
+    -webkit-backdrop-filter: saturate(1.4) blur(10px);
   }
 
   .explore-tab {
