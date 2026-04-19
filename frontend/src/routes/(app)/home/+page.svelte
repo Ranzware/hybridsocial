@@ -4,6 +4,7 @@
   import { getHomeTimeline } from '$lib/api/timelines.js';
   import FeedList from '$lib/components/feed/FeedList.svelte';
   import FeedToggle, { type FeedTab } from '$lib/components/feed/FeedToggle.svelte';
+  import NewPostsBanner from '$lib/components/feed/NewPostsBanner.svelte';
   import StoriesCarousel from '$lib/components/stories/StoriesCarousel.svelte';
   import {
     queuedCount,
@@ -143,12 +144,7 @@
   <div class="home-sticky-bar">
     <FeedToggle active={feedType} onchange={handleFeedChange} />
 
-    {#if $queuedCount > 0}
-      <button type="button" class="new-posts-banner" onclick={mergeQueuedPosts}>
-        <span class="material-symbols-outlined banner-icon">arrow_upward</span>
-        {$queuedCount} new {$queuedCount === 1 ? 'post' : 'posts'}
-      </button>
-    {/if}
+    <NewPostsBanner count={$queuedCount} onclick={mergeQueuedPosts} />
   </div>
 
   <FeedList
@@ -189,40 +185,4 @@
     padding-inline: var(--space-2);
   }
 
-  .new-posts-banner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    width: 100%;
-    padding: 10px;
-    background: var(--color-primary);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 150ms ease;
-    animation: banner-slide-in 0.3s ease;
-  }
-
-  .new-posts-banner:hover {
-    opacity: 0.9;
-  }
-
-  .banner-icon {
-    font-size: 18px;
-  }
-
-  @keyframes banner-slide-in {
-    from {
-      opacity: 0;
-      transform: translateY(-8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
 </style>
