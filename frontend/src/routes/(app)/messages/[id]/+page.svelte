@@ -51,31 +51,54 @@
 
   let avatarUser = $derived(otherParticipants[0] ?? null);
 
-  onMount(() => {
+  // SvelteKit reuses this component when navigating between conversations
+  // (only the `[id]` param changes), so `onMount` never re-fires and the
+  // old messages would remain on screen. Keyed on `conversationId`, the
+  // effect reloads whenever the URL points to a new thread, and a token
+  // lets us ignore stale responses if the user clicks another convo before
+  // the previous fetch resolves.
+  let loadToken = 0;
+
+  $effect(() => {
+    const cid = conversationId;
+    if (!cid) return;
+    const token = ++loadToken;
+
+    // Reset per-conversation state up front so the UI doesn't flash the
+    // previous chat's messages while the new one is loading.
+    conversation = null;
+    messages = [];
+    cursor = null;
+    hasMore = true;
+    sending = false;
+    loading = true;
+
     void (async () => {
       try {
         const [conv, msgResult] = await Promise.all([
-          getConversation(conversationId),
-          getMessages(conversationId)
+          getConversation(cid),
+          getMessages(cid)
         ]);
+        if (token !== loadToken) return;
         conversation = conv;
         messages = msgResult.data.reverse();
         cursor = msgResult.next_cursor;
         hasMore = !!msgResult.next_cursor;
-        // Clear the DM badge optimistically — the server-side
-        // markConversationRead call below will fire `chat.read`
-        // which also clears, but doing it here avoids a one-event
-        // delay before the badge drops.
-        markConversationReadLocal(conversationId);
-        await markConversationRead(conversationId);
+        markConversationReadLocal(cid);
+        await markConversationRead(cid);
+        if (token !== loadToken) return;
         scrollToBottom();
-      } catch {
-        // Error loading conversation
+      } catch (err) {
+        if (token !== loadToken) return;
+        console.error('[messages] load failed', err);
+        addToast('Could not load this conversation', 'error');
       } finally {
-        loading = false;
+        if (token === loadToken) loading = false;
       }
     })();
+  });
 
+  onMount(() => {
     window.addEventListener('chat-event', handleChatEvent as EventListener);
     return () => {
       window.removeEventListener('chat-event', handleChatEvent as EventListener);
@@ -149,8 +172,11 @@
       messages = [...messages, msg];
       triggerRipple();
       scrollToBottom();
-    } catch {
-      // Error sending
+    } catch (err) {
+      // Never leave the composer in a stuck "sending" state if something
+      // fails — surface the error so the user knows why and can retry.
+      console.error('[messages] send failed', err);
+      addToast('Could not send message. Please try again.', 'error');
     } finally {
       sending = false;
     }
