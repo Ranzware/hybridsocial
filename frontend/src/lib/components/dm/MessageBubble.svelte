@@ -65,8 +65,8 @@
   let savingEdit = $state(false);
 
   // Conservative guesses for where the picker needs room. The picker
-  // itself isn't mounted yet at the moment we decide placement, so we
-  // can't measure it — these cover the 2-row emoji layout.
+  // isn't mounted yet at the moment we decide placement, so it can't
+  // be measured — these match the 2-row emoji layout.
   const PICKER_ESTIMATED_HEIGHT = 140;
   const PICKER_ESTIMATED_WIDTH = 240;
 
@@ -74,15 +74,13 @@
     if (!pickerOpen || !reactionButtonEl) return;
     const rect = reactionButtonEl.getBoundingClientRect();
 
-    // Vertical flip: not enough space below → open above.
+    // Vertical: flip above when there isn't room below.
     pickerAbove = window.innerHeight - rect.bottom < PICKER_ESTIMATED_HEIGHT;
 
-    // Horizontal flip: would opening leftward (picker's right edge at
-    // the button's right edge) clip off the left side of the viewport?
-    // If so, open rightward instead. This is what keeps own-message
-    // pickers out of the sidebar when the app is in LTR mode, and
-    // other-message pickers out of the right edge in RTL.
-    pickerOpensLeft = rect.right >= PICKER_ESTIMATED_WIDTH;
+    // Horizontal: default is opening rightward from the button's left
+    // edge. Flip to leftward only when opening rightward would push
+    // the picker past the viewport's right edge.
+    pickerOpensLeft = rect.left + PICKER_ESTIMATED_WIDTH > window.innerWidth;
   });
 
   // Debounce timers for the hover-open picker. Open after a short
