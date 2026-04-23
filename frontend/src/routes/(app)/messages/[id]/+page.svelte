@@ -28,7 +28,6 @@
   let messages = $state<Message[]>([]);
   let loading = $state(true);
   let loadingMore = $state(false);
-  let sending = $state(false);
   let cursor = $state<string | null>(null);
   let hasMore = $state(true);
   let messagesEndEl: HTMLDivElement | undefined = $state();
@@ -70,7 +69,6 @@
     messages = [];
     cursor = null;
     hasMore = true;
-    sending = false;
     loading = true;
 
     void (async () => {
@@ -164,31 +162,30 @@
     }
   }
 
+  // The composer stays interactive at all times. MessageInput clears
+  // its textarea the moment it fires onsend, so the user can't
+  // accidentally double-send the same content — and they SHOULD be
+  // allowed to queue the next message while the previous is in flight.
+  // The previous "disabled while sending" pattern had a sticky bug
+  // that left the input frozen until a page refresh; simpler to keep
+  // it live and let the async sends resolve independently.
   async function handleSend(content: string) {
-    if (sending) return;
-    sending = true;
-    // Defense-in-depth watchdog: if something in the promise chain
-    // somehow leaves `sending` stuck (past bug: silent rejection on
-    // token refresh race), force-unstick after a reasonable timeout
-    // so the composer never requires a page refresh to work again.
-    const watchdog = window.setTimeout(() => {
-      if (sending) {
-        console.warn('[messages] send watchdog fired; resetting sending flag');
-        sending = false;
-        addToast('Send timed out. Please try again.', 'error');
-      }
-    }, 10_000);
     try {
       const msg = await sendMessage(conversationId, { content });
-      messages = [...messages, msg];
+      // The SSE stream broadcasts our own message back to us, and the
+      // POST response can race with it either direction. If we blindly
+      // append both, {#each messages as m (m.id)} throws
+      // `each_key_duplicate`, which poisons Svelte's render loop and
+      // makes the composer look frozen until the user refreshes.
+      // Dedup by id so only the first arrival wins.
+      if (!messages.some((m) => m.id === msg.id)) {
+        messages = [...messages, msg];
+      }
       triggerRipple();
       scrollToBottom();
     } catch (err) {
       console.error('[messages] send failed', err);
       addToast('Could not send message. Please try again.', 'error');
-    } finally {
-      window.clearTimeout(watchdog);
-      sending = false;
     }
   }
 
@@ -408,7 +405,7 @@
       <div bind:this={messagesEndEl} class="messages-end" aria-hidden="true"></div>
     </div>
 
-    <MessageInput onsend={handleSend} disabled={sending} />
+    <MessageInput onsend={handleSend} />
   {/if}
 </div>
 
