@@ -153,6 +153,89 @@ defmodule Hybridsocial.Auth do
     {:ok, count}
   end
 
+  # ---- Sudo (step-up auth) ----
+  #
+  # Sudo mode is a short-lived flag on the token row that proves the
+  # operator re-entered password + TOTP within the last N minutes. The
+  # admin pipeline gates every write/read behind `sudo_until > now`.
+  # The TTL is *rolling* — every successful admin request pushes the
+  # expiry out by the same window, so active work doesn't get interrupted
+  # but an idle tab times out.
+  @sudo_ttl_seconds 15 * 60
+
+  def sudo_ttl_seconds, do: @sudo_ttl_seconds
+
+  @doc "Mark the given access token as sudo-elevated for `@sudo_ttl_seconds`."
+  def grant_sudo(access_token) do
+    token_hash = Token.hash_token(access_token)
+    until = DateTime.add(DateTime.utc_now(), @sudo_ttl_seconds, :second)
+
+    {count, _} =
+      OAuthToken
+      |> where([t], t.token_hash == ^token_hash and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [sudo_until: until])
+
+    case count do
+      0 -> {:error, :not_found}
+      _ -> {:ok, until}
+    end
+  end
+
+  @doc "Clear sudo elevation on the given access token."
+  def revoke_sudo(access_token) do
+    token_hash = Token.hash_token(access_token)
+
+    OAuthToken
+    |> where([t], t.token_hash == ^token_hash)
+    |> Repo.update_all(set: [sudo_until: nil])
+
+    :ok
+  end
+
+  @doc """
+  Returns `{:ok, new_until}` if the token currently has a sudo window that
+  hasn't lapsed, and extends it by the TTL (rolling window). Returns
+  `{:error, :sudo_required}` otherwise.
+  """
+  def check_and_extend_sudo(access_token) do
+    token_hash = Token.hash_token(access_token)
+    now = DateTime.utc_now()
+    new_until = DateTime.add(now, @sudo_ttl_seconds, :second)
+
+    OAuthToken
+    |> where([t], t.token_hash == ^token_hash and is_nil(t.revoked_at))
+    |> select([t], t.sudo_until)
+    |> Repo.one()
+    |> case do
+      nil ->
+        {:error, :sudo_required}
+
+      sudo_until when is_nil(sudo_until) ->
+        {:error, :sudo_required}
+
+      sudo_until ->
+        if DateTime.compare(sudo_until, now) == :gt do
+          OAuthToken
+          |> where([t], t.token_hash == ^token_hash)
+          |> Repo.update_all(set: [sudo_until: new_until])
+
+          {:ok, new_until}
+        else
+          {:error, :sudo_required}
+        end
+    end
+  end
+
+  @doc "Returns the current sudo expiry (or nil) for the given token."
+  def sudo_expires_at(access_token) do
+    token_hash = Token.hash_token(access_token)
+
+    OAuthToken
+    |> where([t], t.token_hash == ^token_hash and is_nil(t.revoked_at))
+    |> select([t], t.sudo_until)
+    |> Repo.one()
+  end
+
   @doc "Update last_active_at for a token (called from auth plug)."
   def touch_session(token_hash, ip_address \\ nil) do
     now = DateTime.utc_now()

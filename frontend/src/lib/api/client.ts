@@ -86,6 +86,16 @@ class ApiClient {
       } catch {
         body = { error: 'unknown_error', error_description: response.statusText };
       }
+
+      // Admin step-up expired or never obtained — signal the admin layout
+      // to show the sudo challenge. Throw as normal so callers can still
+      // handle it, but the event lets a global listener re-gate the UI.
+      if (response.status === 403 && body.error === 'auth.sudo_required') {
+        try {
+          window.dispatchEvent(new CustomEvent('admin-sudo-required'));
+        } catch { /* not in browser */ }
+      }
+
       throw new ApiError(response.status, body);
     }
 

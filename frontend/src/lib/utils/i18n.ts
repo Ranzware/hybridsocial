@@ -49,6 +49,12 @@ const ERROR_FALLBACKS: Record<string, string> = {
   'auth.invite_disabled': 'This invite code has been disabled.',
   'auth.invite_expired': 'This invite code has expired. Ask the person who sent it for a new one.',
   'auth.invite_max_uses_reached': 'This invite code has already been used up.',
+  'auth.sudo_required': 'Please re-enter your password and 2FA code to access the admin panel.',
+  'sudo.invalid_password': 'Incorrect password.',
+  'sudo.invalid_code': 'Incorrect two-factor code.',
+  'sudo.password_required': 'Password is required.',
+  'sudo.otp_required': 'Two-factor code is required.',
+  'sudo.failed': 'Could not unlock admin access. Please try again.',
   'rate_limit.exceeded': 'Too many requests. Please wait a moment.',
   'account.confirmation_required': 'Please check your email to confirm your account.',
 };

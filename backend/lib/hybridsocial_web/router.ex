@@ -29,6 +29,12 @@ defmodule HybridsocialWeb.Router do
     plug HybridsocialWeb.Plugs.RequireAdmin
   end
 
+  # Step-up auth: every admin route except /admin/sudo itself requires
+  # the caller to have re-entered password + TOTP within the sudo TTL.
+  pipeline :admin_sudo do
+    plug HybridsocialWeb.Plugs.RequireSudo
+  end
+
   pipeline :sse do
     plug :accepts, ["json", "event-stream"]
     plug HybridsocialWeb.Plugs.RateLimiter
@@ -614,9 +620,19 @@ defmodule HybridsocialWeb.Router do
     get "/", AppealController, :index
   end
 
-  # Admin routes (authenticated + admin)
+  # Admin step-up (sudo) endpoints — auth + staff, but NOT sudo-gated
+  # (they're how you obtain sudo in the first place).
   scope "/api/v1/admin", HybridsocialWeb.Api.V1 do
     pipe_through [:api, :admin]
+
+    post "/sudo", Admin.SudoController, :grant
+    get "/sudo", Admin.SudoController, :status
+    delete "/sudo", Admin.SudoController, :revoke
+  end
+
+  # Admin routes (authenticated + admin + sudo)
+  scope "/api/v1/admin", HybridsocialWeb.Api.V1 do
+    pipe_through [:api, :admin, :admin_sudo]
 
     # Dashboard
     get "/dashboard", AdminController, :dashboard

@@ -110,6 +110,12 @@
   "error.auth.invite_disabled": "This invite code has been disabled",
   "error.auth.invite_expired": "This invite code has expired. Ask the person who sent it for a new one.",
   "error.auth.invite_max_uses_reached": "This invite code has already been used up",
+  "error.auth.sudo_required": "Please re-enter your password and 2FA code to access the admin panel",
+  "error.sudo.invalid_password": "Incorrect password",
+  "error.sudo.invalid_code": "Incorrect two-factor code",
+  "error.sudo.password_required": "Password is required",
+  "error.sudo.otp_required": "Two-factor code is required",
+  "error.sudo.failed": "Could not unlock admin access. Please try again.",
 
   "error.2fa.invalid_code": "Invalid two-factor code. Please check and try again.",
   "error.2fa.setup_failed": "Failed to set up two-factor authentication",

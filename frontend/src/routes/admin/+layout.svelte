@@ -2,19 +2,47 @@
   import { goto } from '$app/navigation';
   import { browser } from '$app/environment';
   import { get } from 'svelte/store';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { authStore, currentUser, isStaff, initAuth } from '$lib/stores/auth.js';
+  import { sudoExpiresAt, isSudoValid } from '$lib/stores/admin-sudo.js';
+  import { api } from '$lib/api/client.js';
   import AdminSidebar from '$lib/components/admin/AdminSidebar.svelte';
+  import SudoGate from '$lib/components/admin/SudoGate.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
 
   let { children } = $props();
   let authorized = $state(false);
   let checking = $state(true);
+  let checkingSudo = $state(true);
   let user = $derived($currentUser);
   // Admin sessions are high-value — the backend enforces the same rule,
   // but gating the UI up-front avoids rendering a panel whose every
   // request would 403 with admin.otp_required.
   let needsOtp = $derived(!!user && !user.two_factor_enabled);
+  let sudoOk = $derived(isSudoValid($sudoExpiresAt));
+
+  let expiryTimer: ReturnType<typeof setInterval> | null = null;
+
+  function onSudoRequired() {
+    sudoExpiresAt.set(null);
+  }
+
+  async function fetchSudoStatus() {
+    try {
+      const res = await api.get<{ sudo: boolean; expires_at: string | null }>(
+        '/api/v1/admin/sudo'
+      );
+      sudoExpiresAt.set(res.sudo ? res.expires_at : null);
+    } catch {
+      sudoExpiresAt.set(null);
+    } finally {
+      checkingSudo = false;
+    }
+  }
+
+  function handleUnlocked(expiresAt: string) {
+    sudoExpiresAt.set(expiresAt);
+  }
 
   onMount(async () => {
     // Ensure auth is fully initialized (handles page refresh with cookie-based session)
@@ -38,6 +66,28 @@
 
     authorized = true;
     checking = false;
+
+    // Probe sudo status only if 2FA is enabled (the needsOtp branch
+    // will short-circuit rendering otherwise).
+    if (state.user.two_factor_enabled) {
+      await fetchSudoStatus();
+    } else {
+      checkingSudo = false;
+    }
+
+    window.addEventListener('admin-sudo-required', onSudoRequired);
+
+    // Watchdog: when the stored expiry passes, flip the gate back on
+    // without waiting for the next admin API call to 403.
+    expiryTimer = setInterval(() => {
+      const exp = get(sudoExpiresAt);
+      if (exp && !isSudoValid(exp)) sudoExpiresAt.set(null);
+    }, 30000);
+  });
+
+  onDestroy(() => {
+    if (browser) window.removeEventListener('admin-sudo-required', onSudoRequired);
+    if (expiryTimer) clearInterval(expiryTimer);
   });
 
   // Watch for logout or role changes while on admin pages
@@ -78,6 +128,12 @@
             </p>
           </div>
         </div>
+      {:else if checkingSudo}
+        <div class="admin-loading">
+          <div class="admin-loading-spinner"></div>
+        </div>
+      {:else if !sudoOk}
+        <SudoGate onUnlocked={handleUnlocked} />
       {:else}
         {@render children()}
       {/if}
