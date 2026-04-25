@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { listStoryFeed, type StoryGroup } from '$lib/api/stories.js';
+  import { listStoryFeed, type StoryGroup, type Story } from '$lib/api/stories.js';
   import { currentUser } from '$lib/stores/auth.js';
   import StoryViewer from './StoryViewer.svelte';
   import StoryComposer from './StoryComposer.svelte';
@@ -80,7 +80,10 @@
             onclick={handleSelfTileClick}
             aria-label={selfGroup ? 'View your story' : 'Add to your story'}
           >
-            <div class="ring-wrapper" class:has-story={!!selfGroup} class:viewed={selfGroup?.all_viewed}>
+            <div class="ring-wrapper" class:has-story={!!selfGroup}>
+              {#if selfGroup}
+                {@render storyRing(selfGroup.stories)}
+              {/if}
               <div class="avatar-inner">
                 {#if me.avatar_url}
                   <img src={me.avatar_url} alt="" />
@@ -110,7 +113,8 @@
             onclick={() => openViewer(group.identity.id)}
             aria-label={`View ${group.identity.display_name || group.identity.handle}'s story`}
           >
-            <div class="ring-wrapper has-story" class:viewed={group.all_viewed}>
+            <div class="ring-wrapper has-story">
+              {@render storyRing(group.stories)}
               <div class="avatar-inner">
                 {#if group.identity.avatar_url}
                   <img src={group.identity.avatar_url} alt="" />
@@ -126,6 +130,43 @@
     </div>
   </div>
 {/if}
+
+{#snippet storyRing(stories: Story[])}
+  <!-- One arc per story. circumference = 2πr ≈ 289.027 for r=46.
+       Each segment occupies (circumference / n) length, with a small
+       gap chiselled out so the slices read as separate. n=1 collapses
+       to a continuous ring (dasharray length === circumference), n=2
+       shows two C-shapes opposite each other, n=N shows N evenly
+       spaced arcs. Viewed segments dim to the muted border color. -->
+  {@const n = stories.length}
+  {@const circumference = 289.027}
+  {@const gap = n > 1 ? 6 : 0}
+  {@const segLen = Math.max(circumference / n - gap, 4)}
+  {@const remainder = circumference - segLen}
+  <svg class="story-ring-svg" viewBox="0 0 100 100" aria-hidden="true">
+    <defs>
+      <linearGradient id="story-grad" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#f9a826" />
+        <stop offset="50%" stop-color="#ee2a7b" />
+        <stop offset="100%" stop-color="#6228d7" />
+      </linearGradient>
+    </defs>
+    {#each stories as story, i (story.id)}
+      <circle
+        cx="50"
+        cy="50"
+        r="46"
+        fill="none"
+        stroke-width="4"
+        stroke-linecap={n === 1 ? 'butt' : 'round'}
+        stroke={story.viewed ? 'var(--color-border)' : 'url(#story-grad)'}
+        stroke-dasharray="{segLen} {remainder}"
+        stroke-dashoffset={-(i * (circumference / n) + gap / 2)}
+        transform="rotate(-90 50 50)"
+      />
+    {/each}
+  </svg>
+{/snippet}
 
 {#if viewerOpen}
   <StoryViewer
@@ -179,6 +220,7 @@
   }
 
   .ring-wrapper {
+    position: relative;
     width: 72px;
     height: 72px;
     border-radius: 50%;
@@ -194,13 +236,18 @@
     transform: scale(1.04);
   }
 
+  /* When stories exist the SVG ring takes over and we don't want
+     the solid border color showing through behind it. */
   .ring-wrapper.has-story {
-    background: linear-gradient(135deg, #f9a826 0%, #ee2a7b 50%, #6228d7 100%);
-    padding: 3px;
+    background: transparent;
   }
 
-  .ring-wrapper.has-story.viewed {
-    background: var(--color-border);
+  .story-ring-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
   }
 
   .avatar-inner {
