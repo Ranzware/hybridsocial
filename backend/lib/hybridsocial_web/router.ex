@@ -631,6 +631,42 @@ defmodule HybridsocialWeb.Router do
     delete "/sudo", Admin.SudoController, :revoke
   end
 
+  # Per-user moderation actions — auth + staff, NOT sudo-gated.
+  # Step-up auth is reserved for high-blast-radius admin operations
+  # (instance settings, backups, role management, etc.). The actions
+  # here are surfaced from the inline moderation icon on every
+  # profile, so requiring a fresh password+TOTP for each click made
+  # routine moderation impractical. The 2FA-on-account requirement
+  # in RequireAdmin still stands; only the per-action step-up drops.
+  scope "/api/v1/admin", HybridsocialWeb.Api.V1 do
+    pipe_through [:api, :admin]
+
+    # Read for the moderation panel
+    get "/users/:id", AdminController, :show_account
+
+    # Account-level moderation actions
+    post "/accounts/:id/action", AdminController, :account_action
+    post "/users/:id/suspend", AdminController, :suspend_account
+    post "/users/:id/unsuspend", AdminController, :unsuspend_account
+    post "/users/:id/warn", AdminController, :warn_account
+    post "/users/:id/silence", AdminController, :silence_account
+    post "/users/:id/unsilence", AdminController, :unsilence_account
+    post "/users/:id/shadow_ban", AdminController, :shadow_ban_account
+    post "/users/:id/unshadow_ban", AdminController, :unshadow_ban_account
+    post "/users/:id/force_sensitive", AdminController, :force_sensitive_account
+    post "/users/:id/unforce_sensitive", AdminController, :unforce_sensitive_account
+    post "/users/:id/revoke_sessions", AdminController, :revoke_sessions
+    post "/users/:id/trust_level", AdminController, :set_trust_level
+    post "/accounts/:id/trust_level", AdminController, :set_trust_level
+
+    # Moderation notes (read + write for the panel)
+    get "/users/:id/notes", AdminController, :list_notes
+    post "/users/:id/notes", AdminController, :create_note
+    get "/accounts/:id/notes", AdminController, :list_moderation_notes
+    post "/accounts/:id/notes", AdminController, :create_moderation_note
+    delete "/notes/:id", AdminController, :delete_moderation_note
+  end
+
   # Admin routes (authenticated + admin + sudo)
   scope "/api/v1/admin", HybridsocialWeb.Api.V1 do
     pipe_through [:api, :admin, :admin_sudo]
@@ -679,19 +715,10 @@ defmodule HybridsocialWeb.Router do
     # Accounts (aliased as /users for frontend compatibility)
     get "/accounts", AdminController, :list_accounts
     get "/users", AdminController, :list_accounts
-    get "/users/:id", AdminController, :show_account
-    post "/accounts/:id/action", AdminController, :account_action
-    post "/users/:id/suspend", AdminController, :suspend_account
-    post "/users/:id/unsuspend", AdminController, :unsuspend_account
-    post "/users/:id/warn", AdminController, :warn_account
-    post "/users/:id/silence", AdminController, :silence_account
-    post "/users/:id/unsilence", AdminController, :unsilence_account
-    post "/users/:id/shadow_ban", AdminController, :shadow_ban_account
-    post "/users/:id/unshadow_ban", AdminController, :unshadow_ban_account
-    post "/users/:id/force_sensitive", AdminController, :force_sensitive_account
-    post "/users/:id/unforce_sensitive", AdminController, :unforce_sensitive_account
-    post "/users/:id/revoke_sessions", AdminController, :revoke_sessions
-    post "/users/:id/trust_level", AdminController, :set_trust_level
+    # NOTE: per-user moderation actions (silence/suspend/shadow_ban/
+    # force_sensitive/revoke_sessions/trust_level/notes/show_account)
+    # are routed through the non-sudo admin scope above so the inline
+    # moderation icon doesn't demand a fresh password+TOTP per click.
 
     # Ads management
     get "/ads", AdminController, :list_ads
@@ -699,8 +726,6 @@ defmodule HybridsocialWeb.Router do
     put "/ads/:id", AdminController, :update_ad
     delete "/ads/:id", AdminController, :delete_ad
     post "/ads/:id/toggle", AdminController, :toggle_ad
-    get "/users/:id/notes", AdminController, :list_notes
-    post "/users/:id/notes", AdminController, :create_note
 
     # Analytics
     get "/analytics/summary", AdminController, :analytics_summary
@@ -832,18 +857,14 @@ defmodule HybridsocialWeb.Router do
     post "/appeals/:id/approve", AdminController, :approve_appeal
     post "/appeals/:id/reject", AdminController, :reject_appeal
 
-    # Moderation Notes
-    get "/accounts/:id/notes", AdminController, :list_moderation_notes
-    post "/accounts/:id/notes", AdminController, :create_moderation_note
-    delete "/notes/:id", AdminController, :delete_moderation_note
+    # NOTE: moderation notes + trust-level routes live in the non-sudo
+    # admin scope above so the inline moderation panel doesn't trigger
+    # step-up auth for routine actions.
 
     # Invite Codes
     get "/invites", AdminController, :list_invites
     post "/invites", AdminController, :create_invite
     delete "/invites/:id", AdminController, :delete_invite
-
-    # Trust Levels
-    post "/accounts/:id/trust_level", AdminController, :set_trust_level
 
     # Admin Post Management
     get "/posts/:id", AdminController, :show_post
