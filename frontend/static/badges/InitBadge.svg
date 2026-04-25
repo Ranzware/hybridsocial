@@ -4,7 +4,7 @@
 <svg
    width="28.009405mm"
    height="8.9744654mm"
-   viewBox="0 0 28.009406 8.9744656"
+   viewBox="0 0 28.009406 8.9744655"
    version="1.1"
    id="svg1"
    xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -68,23 +68,23 @@
       <path
          id="path27"
          style="display:inline;fill:url(#linearGradient30);fill-opacity:1;stroke:#156056;stroke-width:0.5;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 a 2.0561422,2.0561422 45 0 1 -2.056142,-2.056142 l 0,-5.887716 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
+         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 A 2.0561422,2.0561422 45 0 1 22.080572,44.738658 V 38.850942 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
          transform="matrix(0.91834118,0,0,0.85471103,35.788477,-17.69165)" />
       <g
          id="g33"
          transform="translate(2.02334,-0.32027225)">
-        <text
-           xml:space="preserve"
-           style="font-style:normal;font-variant:normal;font-weight:800;font-stretch:normal;font-size:7.05556px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';writing-mode:lr-tb;direction:ltr;fill:#daf8f5;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-           x="66.225021"
-           y="21.68211"
-           id="text70"><tspan
-             id="tspan69"
-             style="font-size:7.05556px;stroke-width:1"
-             x="66.225021"
-             y="21.68211">I<tspan
-   style="font-size:4.93889px"
-   id="tspan26">NIT</tspan></tspan></text>
+        <g
+           id="text70"
+           style="font-weight:800;font-size:7.05556px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';fill:#daf8f5;paint-order:stroke fill markers"
+           aria-label="INIT">
+          <path
+             d="m 66.789466,21.68211 v -5.080003 h 0.959556 v 5.080003 z"
+             id="path16" />
+          <path
+             style="font-size:4.93889px"
+             d="m 68.659186,21.68211 v -3.556001 h 0.681567 l 1.545873,2.370667 v -2.370667 h 0.681566 v 3.556001 h -0.681566 l -1.545873,-2.370667 v 2.370667 z m 3.64984,0 v -3.556001 h 0.671689 v 3.556001 z m 2.237315,0 v -2.928762 h -1.121128 v -0.627239 h 2.913945 v 0.627239 H 75.21803 v 2.928762 z"
+             id="path17" />
+        </g>
         <g
            id="g32"
            transform="translate(13.255838,-32.467338)"

@@ -4,7 +4,7 @@
 <svg
    width="28.009405mm"
    height="8.9744654mm"
-   viewBox="0 0 28.009406 8.9744656"
+   viewBox="0 0 28.009406 8.9744655"
    version="1.1"
    id="svg1"
    xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -68,23 +68,23 @@
       <path
          id="path9"
          style="fill:url(#linearGradient14);fill-opacity:1;stroke:#156056;stroke-width:0.5;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 a 2.0561422,2.0561422 45 0 1 -2.056142,-2.056142 l 0,-5.887716 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
+         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 A 2.0561422,2.0561422 45 0 1 22.080572,44.738658 V 38.850942 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
          transform="matrix(0.91834118,0,0,0.85471103,25.747135,15.095638)" />
       <g
          id="g14"
          transform="translate(1.4026332,0.77721362)">
-        <text
-           xml:space="preserve"
-           style="font-style:normal;font-variant:normal;font-weight:800;font-stretch:normal;font-size:7.05556px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';writing-mode:lr-tb;direction:ltr;fill:#daf8f5;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-           x="55.534622"
-           y="53.358112"
-           id="text69"><tspan
-             id="tspan68"
-             style="font-size:7.05556px;stroke-width:1"
-             x="55.534622"
-             y="53.358112">M<tspan
-   style="font-size:4.93889px"
-   id="tspan24">AX</tspan></tspan></text>
+        <g
+           id="text69"
+           style="font-weight:800;font-size:7.05556px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';fill:#daf8f5;paint-order:stroke fill markers"
+           aria-label="MAX">
+          <path
+             d="m 56.028511,53.358112 v -5.080003 h 0.860779 l 1.679223,3.372558 1.679223,-3.372558 h 0.860779 v 5.080003 h -0.896056 v -3.033891 l -1.474613,3.033891 H 58.39918 l -1.474612,-3.033891 v 3.033891 z"
+             id="path8" />
+          <path
+             style="font-size:4.93889px"
+             d="m 61.701186,53.358112 1.086556,-3.556 h 1.002595 l 1.086555,3.556 h -0.691444 l -0.968023,-3.136195 h 0.128412 l -0.953206,3.136195 z M 62.35312,52.617279 V 51.99004 h 1.876778 v 0.627239 z m 2.671942,0.740833 1.195211,-1.797756 -1.160639,-1.758244 h 0.824794 l 0.755651,1.185333 0.745772,-1.185333 h 0.829734 l -1.16064,1.758244 1.190273,1.797756 h -0.824795 l -0.780344,-1.224844 -0.785284,1.224844 z"
+             id="path12" />
+        </g>
       </g>
       <g
          id="g12"

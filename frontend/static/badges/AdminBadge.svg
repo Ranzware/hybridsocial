@@ -95,7 +95,7 @@
       <path
          id="path51"
          style="display:inline;fill:url(#linearGradient61);fill-opacity:1;stroke:#156056;stroke-width:0.5;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 a 2.0561422,2.0561422 45 0 1 -2.056142,-2.056142 l 0,-5.887716 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
+         d="M 24.136714,36.7948 H 50.02443 a 2.0561422,2.0561422 45 0 1 2.056142,2.056142 v 5.887716 A 2.0561422,2.0561422 135 0 1 50.02443,46.7948 H 24.136714 A 2.0561422,2.0561422 45 0 1 22.080572,44.738658 V 38.850942 A 2.0561422,2.0561422 135 0 1 24.136714,36.7948 Z"
          transform="matrix(0.91834118,0,0,0.85471106,-13.949973,-69.277426)" />
       <g
          id="g59"
@@ -151,18 +151,18 @@
                    style="fill:#8fe8dd;fill-opacity:1;stroke:none;stroke-width:0.193576;stroke-dasharray:none" />
               </g>
             </g>
-            <text
-               xml:space="preserve"
-               style="font-style:normal;font-variant:normal;font-weight:800;font-stretch:normal;font-size:9.73108px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';writing-mode:lr-tb;direction:ltr;display:inline;fill:#daf8f5;fill-opacity:1;stroke:none;stroke-width:1.9703;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"
-               x="113.57027"
-               y="47.573658"
-               id="text57"><tspan
-                 id="tspan57"
-                 style="font-size:9.73108px;stroke-width:1.9703"
-                 x="113.57027"
-                 y="47.573658"><tspan
-   style="font-size:12.5114px"
-   id="tspan64">A</tspan>DMIN</tspan></text>
+            <g
+               id="text57"
+               style="font-weight:800;font-size:9.73108px;font-family:Manrope;-inkscape-font-specification:'Manrope Ultra-Bold';fill:#daf8f5;stroke-width:1.9703;paint-order:stroke fill markers"
+               aria-label="ADMIN">
+              <path
+                 style="font-size:12.5114px"
+                 d="M 113.82049,47.573658 116.573,38.56545 h 2.53982 l 2.75251,9.008208 h -1.7516 l -2.45224,-7.944739 h 0.3253 l -2.4147,7.944739 z m 1.65151,-1.87671 V 44.108 h 4.75433 v 1.588948 z"
+                 id="path20" />
+              <path
+                 d="M 122.79674,47.573658 V 40.56728 h 2.26734 q 0.0827,0 0.34059,0.0049 0.25787,0.0049 0.49628,0.03406 0.8466,0.102176 1.43533,0.58873 0.58874,0.486554 0.89526,1.235847 0.30653,0.749293 0.30653,1.639687 0,0.890394 -0.30653,1.639687 -0.30652,0.749293 -0.89526,1.235847 -0.58873,0.486554 -1.43533,0.588731 -0.23841,0.02919 -0.49628,0.03406 -0.25788,0.0049 -0.34059,0.0049 z m 1.34289,-1.245578 h 0.92445 q 0.13137,0 0.35518,-0.0049 0.22382,-0.0097 0.40384,-0.04379 0.45736,-0.09244 0.74443,-0.428167 0.29193,-0.335722 0.42817,-0.80768 0.1411,-0.471957 0.1411,-0.973108 0,-0.525478 -0.14597,-0.997436 -0.1411,-0.471957 -0.43303,-0.797948 -0.29193,-0.325991 -0.7347,-0.413571 -0.18002,-0.03892 -0.40384,-0.04379 -0.22381,-0.0049 -0.35518,-0.0049 h -0.92445 z m 5.56616,1.245578 V 40.56728 h 1.1872 l 2.31599,4.651457 2.316,-4.651457 h 1.18719 v 7.006378 h -1.23585 v -4.184364 l -2.03379,4.184364 h -0.46709 l -2.0338,-4.184364 v 4.184364 z m 8.46605,0 V 40.56728 h 1.32343 v 7.006378 z m 2.78308,0 V 40.56728 h 1.34289 l 3.04583,4.670919 V 40.56728 h 1.34289 v 7.006378 h -1.34289 l -3.04583,-4.670918 v 4.670918 z"
+                 id="path21" />
+            </g>
           </g>
         </g>
       </g>
