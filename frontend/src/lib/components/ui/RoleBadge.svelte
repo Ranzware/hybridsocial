@@ -33,10 +33,11 @@
   let displayLabel = $derived(label || defaultLabels[type] || type);
   let imgSrc = $derived(badgeImages[type]);
   // The redesigned badges are pill-shaped (~3:1 aspect) instead of
-  // the old square hexes, so locking width to imgSize squished them.
-  // Set height only and let the SVG's intrinsic aspect ratio drive
-  // the rendered width.
-  let imgHeight = $derived(size === 'sm' ? 16 : 22);
+  // the old square hexes, so the visual footprint at the same height
+  // is roughly 3× wider than before. Compensate by dropping height
+  // back down so the rendered width sits closer to what users were
+  // used to with the old square badges.
+  let imgHeight = $derived(size === 'sm' ? 12 : 16);
 </script>
 
 {#if imgSrc}
