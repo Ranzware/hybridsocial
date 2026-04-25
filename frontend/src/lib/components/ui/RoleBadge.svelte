@@ -42,7 +42,15 @@
 
 {#if imgSrc}
   <span class="role-badge badge-{size}" title={displayLabel}>
-    <img src={imgSrc} alt={displayLabel} class="badge-img" height={imgHeight} />
+    <!-- The HTML `height` attribute is overridden by app.css's
+         `img { height: auto }`, so use an inline CSS height that
+         the .badge-img selector can carry through. -->
+    <img
+      src={imgSrc}
+      alt={displayLabel}
+      class="badge-img"
+      style="height: {imgHeight}px"
+    />
   </span>
 {:else}
   <span class="role-badge badge-fallback badge-{type} badge-{size}" title={displayLabel}>
@@ -63,6 +71,16 @@
     display: block;
     flex-shrink: 0;
     width: auto;
+    /* Defensive defaults: the global app.css `img { height: auto }`
+       was wiping the height attribute on these <img>s, so the inline
+       `style="height: …"` the template emits is what wins. The
+       max-height here ensures even a fluke override can't blow them
+       up to the SVG's intrinsic 34px. */
+    max-height: 18px;
+  }
+
+  .badge-md .badge-img {
+    max-height: 22px;
   }
 
   .badge-sm {
