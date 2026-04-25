@@ -2,96 +2,254 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import type { Identity } from '$lib/api/types.js';
+  import type { Identity, Group } from '$lib/api/types.js';
   import { lookupAccount, getFollowing, follow, unfollow } from '$lib/api/accounts.js';
+  import { getGroups } from '$lib/api/groups.js';
+  import { api } from '$lib/api/client.js';
   import { authStore } from '$lib/stores/auth.js';
   import Avatar from '$lib/components/ui/Avatar.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
+  import Modal from '$lib/components/ui/Modal.svelte';
+
+  // Section identifier — drives the modal title and which item-renderer
+  // gets used. Keeping this explicit (instead of just a label) lets the
+  // modal stay generic.
+  type SectionKey = 'people' | 'pages' | 'groups' | 'hashtags' | 'bots';
+
+  interface HashtagItem {
+    name: string;
+    url?: string;
+  }
 
   let handle = $state('');
   let account: Identity | null = $state(null);
-  let following: Identity[] = $state([]);
   let loading = $state(true);
-  let loadingMore = $state(false);
-  let hasMore = $state(true);
-  let cursor: string | null = $state(null);
   let error = $state('');
-  let followingSet: Set<string> = $state(new Set());
-  let followLoading: Set<string> = $state(new Set());
+
+  // Raw follows (people + pages + bots in a single list — backend
+  // returns Identity rows; we partition client-side by type / is_bot).
+  let allFollowing = $state<Identity[]>([]);
+  let myGroups = $state<Group[]>([]);
+  let followedHashtags = $state<HashtagItem[]>([]);
+
+  // Per-section collapse state. People + Pages start expanded since
+  // those are the most-used; the rest fold by default to keep the
+  // page short on first paint.
+  let expanded = $state<Record<SectionKey, boolean>>({
+    people: true,
+    pages: true,
+    groups: false,
+    hashtags: false,
+    bots: false,
+  });
+
+  let isSelf = $derived.by(() => {
+    if (!account) return false;
+    return get(authStore).user?.id === account.id;
+  });
 
   const unsub = page.subscribe(($page) => {
     handle = $page.params.handle!;
   });
 
-  async function loadFollowing(reset = false) {
-    if (reset) {
-      following = [];
-      cursor = null;
-      hasMore = true;
-      loading = true;
-    } else {
-      loadingMore = true;
+  // Pull every page of /following so the buckets are accurate. Cap at
+  // ~500 to keep memory bounded — accounts with thousands of follows
+  // will still see a full page-1 of each bucket and can use the modal
+  // search to find specifics.
+  async function loadAllFollowing(accountId: string): Promise<Identity[]> {
+    const out: Identity[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 25; i++) {
+      const result = await getFollowing(accountId, cursor);
+      const data = Array.isArray(result) ? result : (result.data ?? []);
+      out.push(...data);
+      const next = Array.isArray(result) ? null : result.next_cursor;
+      if (!next || data.length === 0) break;
+      cursor = next;
     }
-    error = '';
+    return out;
+  }
 
+  async function loadAll() {
+    loading = true;
+    error = '';
     try {
-      if (!account) {
-        account = await lookupAccount(handle);
+      account = await lookupAccount(handle);
+      const tasks: Promise<unknown>[] = [
+        loadAllFollowing(account.id).then((rows) => {
+          allFollowing = rows;
+        }),
+      ];
+
+      // Groups + hashtag follows are private state — only the viewer's
+      // own lists are exposed. Other profiles see a placeholder section
+      // so the layout stays consistent.
+      if (get(authStore).user?.id === account.id) {
+        tasks.push(
+          getGroups('member')
+            .then((res) => {
+              myGroups = Array.isArray(res) ? res : (res.data ?? []);
+            })
+            .catch(() => {
+              myGroups = [];
+            }),
+        );
+        tasks.push(
+          api
+            .get<HashtagItem[] | { name: string }[]>('/api/v1/accounts/followed_tags')
+            .then((res) => {
+              followedHashtags = Array.isArray(res) ? (res as HashtagItem[]) : [];
+            })
+            .catch(() => {
+              followedHashtags = [];
+            }),
+        );
       }
-      const result = await getFollowing(account.id, cursor || undefined);
-      const data = Array.isArray(result) ? result : result.data || [];
-      if (reset) {
-        following = data;
-        // Mark all as followed since this is the following list
-        followingSet = new Set(data.map((a: Identity) => a.id));
-      } else {
-        following = [...following, ...data];
-        const s = new Set(followingSet);
-        data.forEach((a: Identity) => s.add(a.id));
-        followingSet = s;
-      }
-      cursor = Array.isArray(result) ? null : result.next_cursor;
-      hasMore = Array.isArray(result) ? data.length >= 20 : !!result.next_cursor;
+
+      await Promise.all(tasks);
     } catch {
       error = 'Failed to load following.';
     } finally {
       loading = false;
-      loadingMore = false;
     }
   }
 
-  async function toggleFollow(id: string, isFollowingUser: boolean) {
-    const next = new Set(followLoading);
+  // Buckets — derived so the sections re-render reactively when an
+  // unfollow toggles `allFollowing`. type === 'page' is the
+  // canonical page marker (pages are Identity rows with that type),
+  // is_bot trumps a bare `user` type so a "user that is a bot" lands
+  // under Bots, not People.
+  let people = $derived(
+    allFollowing.filter((a) => a.type !== 'page' && !a.is_bot),
+  );
+  let pages = $derived(allFollowing.filter((a) => a.type === 'page'));
+  let bots = $derived(
+    allFollowing.filter((a) => a.is_bot && a.type !== 'page'),
+  );
+
+  // Show-more modal
+  let modalOpen = $state(false);
+  let modalSection = $state<SectionKey>('people');
+  let modalQuery = $state('');
+  let modalPage = $state(0);
+  const MODAL_PAGE_SIZE = 20;
+
+  function openModal(section: SectionKey) {
+    modalSection = section;
+    modalQuery = '';
+    modalPage = 0;
+    modalOpen = true;
+  }
+
+  function modalTitle(section: SectionKey): string {
+    return {
+      people: 'People',
+      pages: 'Pages',
+      groups: 'Groups',
+      hashtags: 'Hashtags',
+      bots: 'Bots',
+    }[section];
+  }
+
+  let modalSourceItems = $derived.by<unknown[]>(() => {
+    switch (modalSection) {
+      case 'people':
+        return people;
+      case 'pages':
+        return pages;
+      case 'groups':
+        return myGroups;
+      case 'hashtags':
+        return followedHashtags;
+      case 'bots':
+        return bots;
+    }
+  });
+
+  let modalFiltered = $derived.by<unknown[]>(() => {
+    const q = modalQuery.trim().toLowerCase();
+    if (!q) return modalSourceItems;
+    return modalSourceItems.filter((item) => modalMatches(item, q));
+  });
+
+  let modalTotalPages = $derived(
+    Math.max(1, Math.ceil(modalFiltered.length / MODAL_PAGE_SIZE)),
+  );
+
+  let modalSlice = $derived(
+    modalFiltered.slice(
+      modalPage * MODAL_PAGE_SIZE,
+      modalPage * MODAL_PAGE_SIZE + MODAL_PAGE_SIZE,
+    ),
+  );
+
+  // Clamp the page index whenever filtering trims the result set so a
+  // search that empties the current page doesn't show a blank list.
+  $effect(() => {
+    if (modalPage >= modalTotalPages) modalPage = modalTotalPages - 1;
+    if (modalPage < 0) modalPage = 0;
+  });
+
+  function modalMatches(item: unknown, q: string): boolean {
+    const i = item as Record<string, unknown>;
+    const haystack = [
+      i.name,
+      i.display_name,
+      i.handle,
+      i.acct,
+      i.bio,
+      i.description,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(q);
+  }
+
+  // Unfollow flow for People / Pages / Bots — toggles the row out of
+  // allFollowing without re-fetching the whole list.
+  let unfollowingIds = $state<Set<string>>(new Set());
+
+  async function handleUnfollow(id: string) {
+    const next = new Set(unfollowingIds);
     next.add(id);
-    followLoading = next;
+    unfollowingIds = next;
     try {
-      if (isFollowingUser) {
-        await unfollow(id);
-        const s = new Set(followingSet);
-        s.delete(id);
-        followingSet = s;
-      } else {
-        await follow(id);
-        const s = new Set(followingSet);
-        s.add(id);
-        followingSet = s;
-      }
+      await unfollow(id);
+      allFollowing = allFollowing.filter((a) => a.id !== id);
     } catch {
-      // Error handled silently
+      // Surface in the page error banner if needed; silent for now.
     } finally {
-      const n = new Set(followLoading);
-      n.delete(id);
-      followLoading = n;
+      const after = new Set(unfollowingIds);
+      after.delete(id);
+      unfollowingIds = after;
     }
   }
 
-  function isOwnAccount(id: string): boolean {
-    const state = get(authStore);
-    return state.user?.id === id;
+  async function handleUnfollowHashtag(name: string) {
+    try {
+      await api.delete(`/api/v1/accounts/followed_tags/${encodeURIComponent(name)}`);
+      followedHashtags = followedHashtags.filter((t) => t.name !== name);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleLeaveGroup(id: string) {
+    try {
+      await api.post(`/api/v1/groups/${id}/leave`);
+      myGroups = myGroups.filter((g) => g.id !== id);
+    } catch {
+      // ignore
+    }
+  }
+
+  function toggleSection(key: SectionKey) {
+    expanded[key] = !expanded[key];
   }
 
   onMount(() => {
-    loadFollowing(true);
+    loadAll();
     return () => unsub();
   });
 </script>
@@ -120,51 +278,236 @@
   {:else if error}
     <div class="error-state">
       <p>{error}</p>
-      <button type="button" class="btn btn-outline" onclick={() => loadFollowing(true)}>Retry</button>
-    </div>
-  {:else if following.length === 0}
-    <div class="empty-state">
-      <p class="empty-text">Not following anyone yet</p>
+      <button type="button" class="btn btn-outline" onclick={loadAll}>Retry</button>
     </div>
   {:else}
-    <div class="account-list">
-      {#each following as acct (acct.id)}
-        <div class="account-card">
-          <a href="/@{acct.handle}" class="account-info-link">
-            <Avatar src={acct.avatar_url} name={acct.display_name || acct.handle} size="md" />
-            <div class="account-info">
-              <span class="account-name">{acct.display_name || acct.handle}</span>
-              <span class="account-handle">@{acct.handle}</span>
-            </div>
-          </a>
-          {#if !isOwnAccount(acct.id)}
-            <button
-              type="button"
-              class="btn {followingSet.has(acct.id) ? 'btn-outline' : 'btn-primary'} btn-sm"
-              onclick={() => toggleFollow(acct.id, followingSet.has(acct.id))}
-              disabled={followLoading.has(acct.id)}
-            >
-              {followingSet.has(acct.id) ? 'Following' : 'Follow'}
+    {@render section(
+      'people',
+      'People',
+      people.length,
+      'Following: real human accounts you follow.',
+    )}
+    {#if expanded.people}
+      <div class="section-body">
+        {#if people.length === 0}
+          <p class="section-empty">Not following any people yet.</p>
+        {:else}
+          <ul class="account-list">
+            {#each people.slice(0, 10) as acct (acct.id)}
+              {@render accountRow(acct)}
+            {/each}
+          </ul>
+          {#if people.length > 10}
+            <button type="button" class="show-more" onclick={() => openModal('people')}>
+              Show all {people.length} people
             </button>
           {/if}
-        </div>
-      {/each}
-    </div>
+        {/if}
+      </div>
+    {/if}
 
-    {#if hasMore}
-      <div class="load-more">
-        <button
-          type="button"
-          class="btn btn-outline"
-          onclick={() => loadFollowing(false)}
-          disabled={loadingMore}
-        >
-          {loadingMore ? 'Loading...' : 'Load more'}
-        </button>
+    {@render section('pages', 'Pages', pages.length, 'Pages you follow.')}
+    {#if expanded.pages}
+      <div class="section-body">
+        {#if pages.length === 0}
+          <p class="section-empty">No followed pages yet.</p>
+        {:else}
+          <ul class="account-list">
+            {#each pages.slice(0, 10) as acct (acct.id)}
+              {@render accountRow(acct)}
+            {/each}
+          </ul>
+          {#if pages.length > 10}
+            <button type="button" class="show-more" onclick={() => openModal('pages')}>
+              Show all {pages.length} pages
+            </button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
+
+    {@render section('groups', 'Groups', myGroups.length, 'Groups you belong to.')}
+    {#if expanded.groups}
+      <div class="section-body">
+        {#if !isSelf}
+          <p class="section-empty">Group memberships are private.</p>
+        {:else if myGroups.length === 0}
+          <p class="section-empty">Not part of any groups yet.</p>
+        {:else}
+          <ul class="account-list">
+            {#each myGroups.slice(0, 10) as g (g.id)}
+              {@render groupRow(g)}
+            {/each}
+          </ul>
+          {#if myGroups.length > 10}
+            <button type="button" class="show-more" onclick={() => openModal('groups')}>
+              Show all {myGroups.length} groups
+            </button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
+
+    {@render section(
+      'hashtags',
+      'Hashtags',
+      followedHashtags.length,
+      'Hashtags you follow.',
+    )}
+    {#if expanded.hashtags}
+      <div class="section-body">
+        {#if !isSelf}
+          <p class="section-empty">Followed hashtags are private.</p>
+        {:else if followedHashtags.length === 0}
+          <p class="section-empty">No followed hashtags yet.</p>
+        {:else}
+          <ul class="hashtag-list">
+            {#each followedHashtags.slice(0, 10) as tag (tag.name)}
+              {@render hashtagRow(tag)}
+            {/each}
+          </ul>
+          {#if followedHashtags.length > 10}
+            <button type="button" class="show-more" onclick={() => openModal('hashtags')}>
+              Show all {followedHashtags.length} hashtags
+            </button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
+
+    {@render section(
+      'bots',
+      'Bots',
+      bots.length,
+      'Automated accounts you follow.',
+    )}
+    {#if expanded.bots}
+      <div class="section-body">
+        {#if bots.length === 0}
+          <p class="section-empty">No followed bots yet.</p>
+        {:else}
+          <ul class="account-list">
+            {#each bots.slice(0, 10) as acct (acct.id)}
+              {@render accountRow(acct)}
+            {/each}
+          </ul>
+          {#if bots.length > 10}
+            <button type="button" class="show-more" onclick={() => openModal('bots')}>
+              Show all {bots.length} bots
+            </button>
+          {/if}
+        {/if}
       </div>
     {/if}
   {/if}
 </div>
+
+{#snippet section(key: SectionKey, label: string, count: number, hint: string)}
+  <button
+    type="button"
+    class="section-header"
+    onclick={() => toggleSection(key)}
+    aria-expanded={expanded[key]}
+  >
+    <span class="section-caret" class:open={expanded[key]} aria-hidden="true">▶</span>
+    <span class="section-label">{label}</span>
+    <span class="section-count">{count}</span>
+    <span class="section-hint">{hint}</span>
+  </button>
+{/snippet}
+
+{#snippet accountRow(acct: Identity)}
+  <li class="account-card">
+    <a href="/@{acct.handle}" class="account-info-link">
+      <Avatar src={acct.avatar_url} name={acct.display_name || acct.handle} size="md" />
+      <div class="account-info">
+        <span class="account-name">{acct.display_name || acct.handle}</span>
+        <span class="account-handle">@{acct.handle}</span>
+      </div>
+    </a>
+    {#if isSelf}
+      <button
+        type="button"
+        class="btn btn-outline btn-sm"
+        onclick={() => handleUnfollow(acct.id)}
+        disabled={unfollowingIds.has(acct.id)}
+      >
+        {unfollowingIds.has(acct.id) ? '…' : 'Unfollow'}
+      </button>
+    {/if}
+  </li>
+{/snippet}
+
+{#snippet groupRow(g: Group)}
+  <li class="account-card">
+    <a href="/groups/{g.id}" class="account-info-link">
+      <Avatar src={g.avatar_url} name={g.name} size="md" />
+      <div class="account-info">
+        <span class="account-name">{g.name}</span>
+        <span class="account-handle">{g.member_count} {g.member_count === 1 ? 'member' : 'members'}</span>
+      </div>
+    </a>
+    {#if isSelf}
+      <button type="button" class="btn btn-outline btn-sm" onclick={() => handleLeaveGroup(g.id)}>Leave</button>
+    {/if}
+  </li>
+{/snippet}
+
+{#snippet hashtagRow(tag: HashtagItem)}
+  <li class="hashtag-card">
+    <a href="/tags/{encodeURIComponent(tag.name)}" class="account-info-link">
+      <span class="hashtag-symbol" aria-hidden="true">#</span>
+      <span class="account-name">{tag.name}</span>
+    </a>
+    {#if isSelf}
+      <button type="button" class="btn btn-outline btn-sm" onclick={() => handleUnfollowHashtag(tag.name)}>Unfollow</button>
+    {/if}
+  </li>
+{/snippet}
+
+<Modal bind:open={modalOpen} title="All {modalTitle(modalSection)} ({modalFiltered.length})">
+  <div class="modal-search">
+    <input
+      type="search"
+      class="modal-search-input"
+      placeholder="Search…"
+      bind:value={modalQuery}
+      aria-label="Search {modalTitle(modalSection)}"
+    />
+  </div>
+
+  {#if modalFiltered.length === 0}
+    <p class="modal-empty">No matches.</p>
+  {:else}
+    <ul class="modal-list">
+      {#each modalSlice as item (modalSection === 'hashtags' ? (item as HashtagItem).name : (item as { id: string }).id)}
+        {#if modalSection === 'groups'}
+          {@render groupRow(item as Group)}
+        {:else if modalSection === 'hashtags'}
+          {@render hashtagRow(item as HashtagItem)}
+        {:else}
+          {@render accountRow(item as Identity)}
+        {/if}
+      {/each}
+    </ul>
+  {/if}
+
+  <div class="modal-pager">
+    <button
+      type="button"
+      class="btn btn-outline btn-sm"
+      disabled={modalPage === 0}
+      onclick={() => (modalPage = Math.max(0, modalPage - 1))}
+    >Prev</button>
+    <span class="modal-page-label">Page {modalPage + 1} of {modalTotalPages}</span>
+    <button
+      type="button"
+      class="btn btn-outline btn-sm"
+      disabled={modalPage >= modalTotalPages - 1}
+      onclick={() => (modalPage = Math.min(modalTotalPages - 1, modalPage + 1))}
+    >Next</button>
+  </div>
+</Modal>
 
 <style>
   .following-page {
@@ -188,7 +531,6 @@
     border-radius: var(--radius-full);
     color: var(--color-text);
     text-decoration: none;
-    transition: background var(--transition-fast);
   }
 
   .back-link:hover {
@@ -200,7 +542,6 @@
     font-size: var(--text-xl);
     font-weight: 700;
     color: var(--color-text);
-    line-height: 1.2;
   }
 
   .page-subtitle {
@@ -214,37 +555,98 @@
     padding: var(--space-16);
   }
 
-  .error-state,
-  .empty-state {
+  .error-state {
     text-align: center;
-    padding: var(--space-16) var(--space-4);
+    padding: var(--space-12) var(--space-4);
     display: flex;
     flex-direction: column;
+    gap: var(--space-3);
+    align-items: center;
+  }
+
+  /* Section header — clickable bar that toggles the body. The caret
+     rotates 90° when the section is open so the affordance reads. */
+  .section-header {
+    display: flex;
     align-items: center;
     gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    margin-block-start: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    cursor: pointer;
+    text-align: start;
+    color: var(--color-text);
   }
 
-  .empty-text {
-    font-size: var(--text-base);
+  .section-header:hover {
+    background: var(--color-surface-raised);
+  }
+
+  .section-caret {
+    font-size: 10px;
     color: var(--color-text-tertiary);
+    transition: transform 150ms ease;
   }
 
-  .account-list {
+  .section-caret.open {
+    transform: rotate(90deg);
+  }
+
+  .section-label {
+    font-size: var(--text-base);
+    font-weight: 700;
+  }
+
+  .section-count {
+    font-size: var(--text-xs);
+    background: var(--color-primary-soft);
+    color: var(--color-primary);
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-weight: 700;
+  }
+
+  .section-hint {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+    margin-inline-start: auto;
+    text-align: end;
+  }
+
+  .section-body {
+    padding-block: var(--space-2);
+  }
+
+  .section-empty {
+    padding: var(--space-3) var(--space-4);
+    color: var(--color-text-tertiary);
+    font-size: var(--text-sm);
+  }
+
+  .account-list,
+  .hashtag-list,
+  .modal-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-1);
   }
 
-  .account-card {
+  .account-card,
+  .hashtag-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: var(--space-3) var(--space-4);
     border-radius: var(--radius-lg);
-    transition: background var(--transition-fast);
   }
 
-  .account-card:hover {
+  .account-card:hover,
+  .hashtag-card:hover {
     background: var(--color-surface);
   }
 
@@ -282,42 +684,89 @@
     color: var(--color-text-secondary);
   }
 
-  .load-more {
-    display: flex;
-    justify-content: center;
-    padding: var(--space-4);
+  .hashtag-symbol {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    width: 32px;
+    text-align: center;
   }
 
+  .show-more {
+    width: 100%;
+    margin-block-start: var(--space-2);
+    padding: var(--space-2);
+    background: transparent;
+    color: var(--color-primary);
+    border: 0;
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .show-more:hover {
+    background: var(--color-primary-soft);
+  }
+
+  /* Modal */
+  .modal-search {
+    margin-block-end: var(--space-3);
+  }
+
+  .modal-search-input {
+    width: 100%;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    background: var(--color-bg);
+  }
+
+  .modal-search-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+  }
+
+  .modal-empty {
+    text-align: center;
+    color: var(--color-text-tertiary);
+    padding: var(--space-6);
+    font-size: var(--text-sm);
+  }
+
+  .modal-pager {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-block-start: var(--space-3);
+    padding-block-start: var(--space-3);
+    border-block-start: 1px solid var(--color-border);
+  }
+
+  .modal-page-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+  }
+
+  /* Buttons */
   .btn {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
-    border: none;
     border-radius: var(--radius-md);
     font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
+    border: 0;
     transition: background var(--transition-fast);
   }
 
   .btn-sm {
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
-  }
-
-  .btn-primary {
-    background: var(--color-primary);
-    color: var(--color-text-inverse);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    background: var(--color-primary-hover);
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .btn-outline {
