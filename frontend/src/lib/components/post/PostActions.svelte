@@ -39,6 +39,26 @@
   let isBookmarked = $state(!!post.is_bookmarked);
   let currentReaction = $state(post.current_user_reaction);
   let showReactionPicker = $state(false);
+  // Below-vs-above flip: the picker normally renders above the like
+  // button, but on a post near the top of the viewport that sends
+  // the picker off the top of the screen. Measure the trigger rect
+  // when the picker opens and flip below if there isn't enough room
+  // above to fit the 2-row picker.
+  let reactionTriggerEl: HTMLButtonElement | undefined = $state();
+  let reactionPickerBelow = $state(false);
+  const REACTION_PICKER_ESTIMATED_HEIGHT = 130;
+
+  $effect(() => {
+    if (!showReactionPicker || !reactionTriggerEl) return;
+    const rect = reactionTriggerEl.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    // Prefer above (existing behavior). Only flip if above is too
+    // tight AND below has more room — keeps the popover stable when
+    // both sides are roomy.
+    reactionPickerBelow =
+      spaceAbove < REACTION_PICKER_ESTIMATED_HEIGHT && spaceBelow > spaceAbove;
+  });
   let showMoreMenu = $state(false);
   let bounceReaction = $state(false);
   let floatingEmoji = $state<string | null>(null);
@@ -538,6 +558,7 @@
       class="action-btn action-like"
       class:active-reaction={currentReaction !== null}
       class:bounce={bounceReaction}
+      bind:this={reactionTriggerEl}
       onclick={toggleReactionPicker}
       aria-label="React"
       aria-expanded={showReactionPicker}
@@ -557,7 +578,7 @@
     </button>
 
     {#if showReactionPicker}
-      <div class="picker-anchor">
+      <div class="picker-anchor" class:picker-anchor-below={reactionPickerBelow}>
         <ReactionPicker
           selected={currentReaction}
           onselect={handleReaction}
@@ -1386,6 +1407,16 @@
     transform: translateX(-50%);
     margin-block-end: 8px;
     z-index: var(--z-dropdown);
+  }
+
+  /* Flip below the trigger when there isn't enough room above —
+     keeps the picker fully visible on posts pinned near the top of
+     the viewport (a single post page, the first feed item, etc.). */
+  .picker-anchor-below {
+    inset-block-end: auto;
+    inset-block-start: 100%;
+    margin-block-end: 0;
+    margin-block-start: 8px;
   }
 
   .action-more-wrapper {
