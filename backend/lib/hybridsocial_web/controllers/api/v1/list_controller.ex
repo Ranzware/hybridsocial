@@ -85,7 +85,10 @@ defmodule HybridsocialWeb.Api.V1.ListController do
         serialize_account(member.target_identity)
       end)
 
-    json(conn, accounts)
+    # Match PaginatedResponse<T> on the frontend so callers can safely
+    # read `result.data`. Without this the page renders members =
+    # undefined and every subsequent `.length` / `.map` call throws.
+    json(conn, %{data: accounts, next_cursor: nil, prev_cursor: nil})
   end
 
   @doc "POST /api/v1/lists/:id/accounts - Add member(s) to list"
