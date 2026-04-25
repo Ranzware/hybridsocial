@@ -49,6 +49,25 @@
     handle = $page.params.handle!;
   });
 
+  // Re-fetch the profile whenever the URL handle changes. Without
+  // this, navigating from /@alice to /@bob via a same-route link
+  // (e.g. the New Members widget on the sidebar) only updates the
+  // address bar — the page component is reused, the loader was
+  // pinned to the original handle, and the user kept staring at the
+  // previous profile. Skip the very first run because onMount also
+  // fires loadProfile() and we don't want a duplicate request.
+  let firstHandleEffect = true;
+  $effect(() => {
+    // Reading `handle` registers the dependency.
+    const h = handle;
+    if (!h) return;
+    if (firstHandleEffect) {
+      firstHandleEffect = false;
+      return;
+    }
+    loadProfile();
+  });
+
   let tabs = $derived(
     isOwnProfile
       ? [
