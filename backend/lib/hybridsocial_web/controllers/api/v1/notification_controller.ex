@@ -2,6 +2,10 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
   use HybridsocialWeb, :controller
 
   alias Hybridsocial.Notifications
+  alias Hybridsocial.Repo
+  alias Hybridsocial.Social.Post
+  alias Hybridsocial.Media
+  import Ecto.Query
   import HybridsocialWeb.Helpers.Pagination, only: [clamp_limit: 1]
 
   # GET /api/v1/notifications
@@ -19,10 +23,11 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
       )
 
     notifications = Notifications.list_notifications(identity.id, opts)
+    posts = preload_target_posts(notifications)
 
     conn
     |> put_status(:ok)
-    |> json(Enum.map(notifications, &serialize_notification/1))
+    |> json(Enum.map(notifications, &serialize_notification(&1, posts)))
   end
 
   # GET /api/v1/notifications/:id
@@ -34,7 +39,8 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
         conn |> put_status(:not_found) |> json(%{error: "notification.not_found"})
 
       notification ->
-        conn |> put_status(:ok) |> json(serialize_notification(notification))
+        posts = preload_target_posts([notification])
+        conn |> put_status(:ok) |> json(serialize_notification(notification, posts))
     end
   end
 
@@ -51,8 +57,9 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
 
     case Notifications.mark_read(id, identity.id) do
       {:ok, notification} ->
-        notification = Hybridsocial.Repo.preload(notification, :actor)
-        conn |> put_status(:ok) |> json(serialize_notification(notification))
+        notification = Repo.preload(notification, :actor)
+        posts = preload_target_posts([notification])
+        conn |> put_status(:ok) |> json(serialize_notification(notification, posts))
 
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "notification.not_found"})
@@ -114,7 +121,12 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
   # Private helpers
   # ---------------------------------------------------------------------------
 
-  defp serialize_notification(notification) do
+  defp serialize_notification(notification, posts) do
+    post =
+      if notification.target_type == "post" and notification.target_id do
+        Map.get(posts, notification.target_id)
+      end
+
     %{
       id: notification.id,
       type: notification.type,
@@ -122,9 +134,60 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
       read: notification.read,
       account: HybridsocialWeb.Helpers.Account.serialize_summary(notification.actor),
       target_type: notification.target_type,
-      target_id: notification.target_id
+      target_id: notification.target_id,
+      post: serialize_post_preview(post)
     }
   end
+
+  # Look up every `post` target across the notification list in a
+  # single batched query, with `media_attachments` preloaded so the
+  # frontend can render either a 30-char text snippet or a small
+  # thumbnail without a follow-up round trip.
+  defp preload_target_posts(notifications) do
+    ids =
+      notifications
+      |> Enum.filter(&(&1.target_type == "post" and not is_nil(&1.target_id)))
+      |> Enum.map(& &1.target_id)
+      |> Enum.uniq()
+
+    case ids do
+      [] ->
+        %{}
+
+      ids ->
+        Post
+        |> where([p], p.id in ^ids and is_nil(p.deleted_at))
+        |> preload(:media_attachments)
+        |> Repo.all()
+        |> Map.new(&{&1.id, &1})
+    end
+  end
+
+  defp serialize_post_preview(nil), do: nil
+
+  defp serialize_post_preview(%Post{} = post) do
+    %{
+      id: post.id,
+      content: post.content,
+      media_attachments: Enum.map(post.media_attachments || [], &serialize_media_preview/1)
+    }
+  end
+
+  defp serialize_media_preview(media) do
+    url = Media.media_url(media)
+
+    %{
+      id: media.id,
+      type: media_type(media.content_type),
+      url: url,
+      preview_url: url
+    }
+  end
+
+  defp media_type("image/" <> _), do: "image"
+  defp media_type("video/" <> _), do: "video"
+  defp media_type("audio/" <> _), do: "audio"
+  defp media_type(_), do: "unknown"
 
   defp parse_list(nil), do: nil
   defp parse_list(list) when is_list(list), do: list
