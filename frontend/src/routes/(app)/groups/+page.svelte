@@ -82,6 +82,18 @@
   function openGroup(id: string) {
     goto(`/groups/${id}`);
   }
+
+  // My-Groups gets a client-side filter — the list is small and a
+  // server round trip would feel laggy. Discover keeps the existing
+  // server-side searchGroups call (debounced via handleSearch).
+  function filterByQuery(list: Group[], q: string): Group[] {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return list;
+    return list.filter((g) => {
+      const haystack = [g.name, g.description].filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(needle);
+    });
+  }
 </script>
 
 <svelte:head>
@@ -92,6 +104,29 @@
   <div class="page-header">
     <h1 class="page-title">Groups</h1>
     <a href="/groups/new" class="btn btn-primary new-group-btn">New group</a>
+  </div>
+
+  <div class="search-bar">
+    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+    <input
+      type="search"
+      class="search-input"
+      placeholder={activeTab === 'discover' ? 'Search groups…' : 'Filter your groups…'}
+      bind:value={searchQuery}
+      oninput={handleSearch}
+      aria-label="Search groups"
+    />
+    {#if searchQuery}
+      <button type="button" class="search-clear" onclick={() => { searchQuery = ''; handleSearch(); }} aria-label="Clear search">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="4" y1="4" x2="16" y2="16" />
+          <line x1="16" y1="4" x2="4" y2="16" />
+        </svg>
+      </button>
+    {/if}
   </div>
 
   <Tabs {tabs} bind:active={activeTab}>
@@ -108,23 +143,20 @@
           </button>
         </div>
       {:else}
-        <div class="group-list">
-          {#each myGroups as group (group.id)}
-            <GroupCard {group} onclick={() => openGroup(group.id)} />
-          {/each}
-        </div>
+        {@const filteredMy = filterByQuery(myGroups, searchQuery)}
+        {#if filteredMy.length === 0}
+          <div class="tab-empty">
+            <p class="empty-text">No groups match "{searchQuery}"</p>
+          </div>
+        {:else}
+          <div class="group-grid">
+            {#each filteredMy as group (group.id)}
+              <GroupCard {group} onclick={() => openGroup(group.id)} />
+            {/each}
+          </div>
+        {/if}
       {/if}
     {:else if activeTab === 'discover'}
-      <div class="discover-search">
-        <input
-          type="text"
-          class="input"
-          placeholder="Search groups..."
-          bind:value={searchQuery}
-          oninput={handleSearch}
-        />
-      </div>
-
       {#if discoverLoading}
         <div class="tab-loading">
           <Spinner />
@@ -134,7 +166,7 @@
           <p class="empty-text">No groups found</p>
         </div>
       {:else}
-        <div class="group-list">
+        <div class="group-grid">
           {#each discoverGroups as group (group.id)}
             <GroupCard {group} onclick={() => openGroup(group.id)} />
           {/each}
@@ -184,13 +216,71 @@
     color: var(--color-text-tertiary);
   }
 
-  .discover-search {
-    padding-block-end: var(--space-4);
+  /* Search */
+  .search-bar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    margin-block-end: var(--space-4);
   }
 
-  .group-list {
+  .search-icon {
+    position: absolute;
+    inset-inline-start: var(--space-3);
+    color: var(--color-text-tertiary);
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    padding: var(--space-3) var(--space-10);
+    padding-inline-start: calc(var(--space-3) + 24px);
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px var(--color-primary-soft);
+  }
+
+  .search-clear {
+    position: absolute;
+    inset-inline-end: var(--space-3);
+    width: 24px;
+    height: 24px;
     display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--color-text-tertiary);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .search-clear:hover {
+    color: var(--color-text);
+    background: var(--color-surface);
+  }
+
+  /* 2-column grid that collapses to 1 column on narrow viewports —
+     matches /pages so the directory listings feel uniform. */
+  .group-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--space-4);
+  }
+
+  @media (min-width: 720px) {
+    .group-grid {
+      grid-template-columns: 1fr 1fr;
+    }
   }
 </style>
