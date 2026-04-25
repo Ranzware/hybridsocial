@@ -79,6 +79,10 @@ defmodule HybridsocialWeb.Api.V1.BookmarkController do
       boost_count: post.boost_count,
       reaction_count: post.reaction_count,
       is_pinned: post.is_pinned,
+      # Every post in this list is bookmarked by definition — without
+      # this flag the menu would show "Bookmark" (instead of "Remove
+      # bookmark") on every row of the bookmarks page.
+      is_bookmarked: true,
       created_at: post.inserted_at,
       edited_at: post.edited_at,
       account: account,

@@ -152,9 +152,38 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
       "type" => "Like",
       "actor" => actor_url,
       "to" => [author_url],
-      "object" => post_url(post.id)
+      "object" => post_object_url(post)
     }
   end
+
+  # --- EmojiReact (Pleroma extension, accepted by Mastodon as Like) ---
+  #
+  # Used for non-default reactions (love/care/wow/sad/angry/lol/...).
+  # Peers that don't speak EmojiReact still treat the activity as a
+  # Like because the shape is identical apart from `type` + `content`.
+  def build_emoji_react(identity, post, emoji) do
+    post = maybe_preload(post, :identity)
+    actor_url = actor_url(identity)
+    author_url = actor_url(post.identity)
+
+    %{
+      "@context" => @context,
+      "id" => activity_id(identity.id, "emoji-react", post.id),
+      "type" => "EmojiReact",
+      "actor" => actor_url,
+      "to" => [author_url],
+      "object" => post_object_url(post),
+      "content" => emoji
+    }
+  end
+
+  # Prefer the post's federated ap_id when present (mirror of a
+  # remote post) so the receiving peer recognizes its own URL;
+  # fall back to our local representation for purely local posts
+  # — they'll never be the target of an outbound reaction in
+  # practice, but the helper keeps both branches sane.
+  defp post_object_url(%{ap_id: ap_id}) when is_binary(ap_id) and ap_id != "", do: ap_id
+  defp post_object_url(post), do: post_url(post.id)
 
   # --- Announce (Boost) ---
 

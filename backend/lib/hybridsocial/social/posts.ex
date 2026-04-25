@@ -984,6 +984,7 @@ defmodule Hybridsocial.Social.Posts do
               # Bell the post's author. Self-reactions are filtered
               # out by create_notification, so we don't guard here.
               Hybridsocial.Notifications.notify_reaction(identity_id, post)
+              maybe_federate_reaction(post, identity_id, type)
               {:ok, reaction}
 
             error ->
@@ -993,13 +994,71 @@ defmodule Hybridsocial.Social.Posts do
         existing ->
           # Reaction already exists — either same type (idempotent
           # no-op) or different type (updating emoji). Re-notifying
-          # would double-bell, so skip.
-          existing
-          |> Reaction.changeset(%{type: type}, opts)
-          |> Repo.update()
+          # would double-bell, so skip. Still federate the new type
+          # so the remote peer sees the swap (Like → 😢, etc).
+          case existing |> Reaction.changeset(%{type: type}, opts) |> Repo.update() do
+            {:ok, _reaction} = ok ->
+              if existing.type != type do
+                maybe_federate_reaction(post, identity_id, type)
+              end
+
+              ok
+
+            error ->
+              error
+          end
       end
     end
   end
+
+  # Push a Like (for type=="like") or EmojiReact activity to the
+  # remote author so reactions on federated posts actually reach the
+  # origin. No-op for purely local posts — the bell + counter already
+  # surface the reaction inside our instance.
+  defp maybe_federate_reaction(%Post{} = post, identity_id, type) do
+    post = Repo.preload(post, :identity)
+    cond do
+      is_nil(post.identity) -> :ok
+      local_identity?(post.identity) -> :ok
+      true -> spawn_federate_reaction(post, identity_id, type)
+    end
+  end
+
+  defp spawn_federate_reaction(post, identity_id, type) do
+    Task.Supervisor.start_child(
+      Hybridsocial.Federation.DeliveryTaskSupervisor,
+      fn ->
+        identity = Repo.get(Hybridsocial.Accounts.Identity, identity_id)
+
+        if identity && is_binary(identity.private_key) do
+          activity =
+            case reaction_emoji_for(type) do
+              nil ->
+                Hybridsocial.Federation.ActivityBuilder.build_like(identity, post)
+
+              emoji ->
+                Hybridsocial.Federation.ActivityBuilder.build_emoji_react(identity, post, emoji)
+            end
+
+          Hybridsocial.Federation.Publisher.publish(activity, identity)
+        end
+      end
+    )
+  end
+
+  # Map our internal reaction type to a Unicode emoji for the
+  # outbound `content` field on EmojiReact. `like` → no content,
+  # everything else carries the corresponding glyph. Mirrors the
+  # ingest map in Federation.ActivityMapper so a round trip
+  # love → ❤️ → love stays stable.
+  defp reaction_emoji_for("like"), do: nil
+  defp reaction_emoji_for("love"), do: "❤️"
+  defp reaction_emoji_for("care"), do: "🤗"
+  defp reaction_emoji_for("lol"), do: "😂"
+  defp reaction_emoji_for("wow"), do: "🤯"
+  defp reaction_emoji_for("sad"), do: "😢"
+  defp reaction_emoji_for("angry"), do: "😡"
+  defp reaction_emoji_for(_), do: nil
 
   def unreact(post_id, identity_id) do
     case get_existing_reaction(post_id, identity_id) do
@@ -1008,14 +1067,65 @@ defmodule Hybridsocial.Social.Posts do
 
       reaction ->
         case Repo.delete(reaction) do
-          {:ok, reaction} ->
+          {:ok, deleted} ->
             update_reaction_count(post_id, -1)
-            {:ok, reaction}
+            # Tell the remote peer to drop the like/emoji-react if
+            # the post lives there. Best-effort; the reaction is
+            # already gone locally.
+            with {:ok, post} <- get_existing_post(post_id) do
+              maybe_federate_unreact(post, identity_id, deleted.type)
+            end
+
+            {:ok, deleted}
 
           error ->
             error
         end
     end
+  end
+
+  defp maybe_federate_unreact(%Post{} = post, identity_id, type) do
+    post = Repo.preload(post, :identity)
+    cond do
+      is_nil(post.identity) -> :ok
+      local_identity?(post.identity) -> :ok
+      true -> spawn_federate_unreact(post, identity_id, type)
+    end
+  end
+
+  defp spawn_federate_unreact(post, identity_id, type) do
+    Task.Supervisor.start_child(
+      Hybridsocial.Federation.DeliveryTaskSupervisor,
+      fn ->
+        identity = Repo.get(Hybridsocial.Accounts.Identity, identity_id)
+
+        if identity && is_binary(identity.private_key) do
+          inner =
+            case reaction_emoji_for(type) do
+              nil ->
+                Hybridsocial.Federation.ActivityBuilder.build_like(identity, post)
+
+              emoji ->
+                Hybridsocial.Federation.ActivityBuilder.build_emoji_react(identity, post, emoji)
+            end
+
+          # Wrap in Undo so the remote peer drops the prior reaction.
+          # Reusing the inner activity verbatim keeps the `id` matched
+          # to what was originally delivered, which is what Mastodon's
+          # Undo handler keys off.
+          undo = %{
+            "@context" => "https://www.w3.org/ns/activitystreams",
+            "id" => inner["id"] <> "/undo",
+            "type" => "Undo",
+            "actor" => inner["actor"],
+            "to" => inner["to"],
+            "object" => inner
+          }
+
+          Hybridsocial.Federation.Publisher.publish(undo, identity)
+        end
+      end
+    )
   end
 
   def get_reactions(post_id) do
