@@ -26,6 +26,12 @@
   let error = $state('');
   let replyTo = $state<Post | null>(null);
   let quotePost = $state<Post | null>(null);
+  // Posting context — when set via the open-composer event from a
+  // group or page detail screen, the resulting post is scoped to
+  // that container rather than the global timeline.
+  let groupId = $state<string | null>(null);
+  let pageId = $state<string | null>(null);
+  let contextLabel = $state<string | null>(null);
 
   // Tier-aware limits
   let charLimit = $derived($currentUser?.limits?.char_limit ?? 5000);
@@ -122,6 +128,16 @@
         ['public', 'followers', 'direct'].includes(detail.visibility)
       ) {
         visibility = detail.visibility;
+      }
+      if (detail?.groupId) {
+        groupId = detail.groupId;
+        pageId = null;
+        contextLabel = detail.contextLabel ?? 'Posting to group';
+      }
+      if (detail?.pageId) {
+        pageId = detail.pageId;
+        groupId = null;
+        contextLabel = detail.contextLabel ?? 'Posting to page';
       }
       if (detail?.draftId) {
         loadDraftById(detail.draftId);
@@ -326,6 +342,9 @@
     showCW = false;
     replyTo = null;
     quotePost = null;
+    groupId = null;
+    pageId = null;
+    contextLabel = null;
     error = '';
     uploadedMedia = [];
     showPoll = false;
@@ -758,6 +777,12 @@
       if (quotePost) {
         body.quote_id = quotePost.id;
       }
+      if (groupId) {
+        body.group_id = groupId;
+      }
+      if (pageId) {
+        body.page_id = pageId;
+      }
       if (uploadedMedia.length > 0) {
         body.media_ids = uploadedMedia.map((m) => m.id);
 
@@ -971,6 +996,13 @@
     {#if replyTo}
       <div class="composer-reply-context">
         Replying to <strong>@{replyTo.account.acct || replyTo.account.handle}</strong>
+      </div>
+    {/if}
+
+    {#if (groupId || pageId) && contextLabel}
+      <div class="composer-scope-context">
+        <span class="material-symbols-outlined" aria-hidden="true">{groupId ? 'groups' : 'description'}</span>
+        <span>{contextLabel}</span>
       </div>
     {/if}
 
@@ -1584,6 +1616,25 @@
     background: var(--color-surface);
     border-radius: 10px;
     margin-block-end: 16px;
+  }
+
+  /* Scope context — shown when posting into a group or page so the
+     user knows the post won't land on their personal profile feed. */
+  .composer-scope-context {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-primary);
+    padding: 6px 12px;
+    background: var(--color-primary-soft);
+    border-radius: 999px;
+    margin-block-end: 12px;
+  }
+
+  .composer-scope-context .material-symbols-outlined {
+    font-size: 16px;
   }
 
   .composer-quote-context {

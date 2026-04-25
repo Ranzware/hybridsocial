@@ -220,6 +220,24 @@
     <div class="group-content">
       <Tabs {tabs} bind:active={activeTab}>
         {#if activeTab === 'posts'}
+          {#if group?.is_member}
+            <button
+              type="button"
+              class="scope-compose-btn"
+              onclick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('open-composer', {
+                    detail: {
+                      groupId: group!.id,
+                      contextLabel: `Posting to ${group!.name || 'group'}`,
+                    },
+                  }),
+                )}
+            >
+              <span class="material-symbols-outlined">edit</span>
+              New post in this group
+            </button>
+          {/if}
           <FeedList
             {posts}
             loading={postsLoading}
@@ -579,5 +597,28 @@
     justify-content: flex-end;
     gap: var(--space-3);
     margin-block-start: var(--space-6);
+  }
+
+  .scope-compose-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin-block-end: var(--space-3);
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    border: 0;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .scope-compose-btn:hover {
+    background: var(--color-primary-hover);
+  }
+
+  .scope-compose-btn .material-symbols-outlined {
+    font-size: 18px;
   }
 </style>

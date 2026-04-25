@@ -197,6 +197,22 @@
     <div class="page-feed-section">
       <Tabs {tabs} bind:active={activeTab}>
         {#if activeTab === 'posts'}
+          <button
+            type="button"
+            class="scope-compose-btn"
+            onclick={() =>
+              window.dispatchEvent(
+                new CustomEvent('open-composer', {
+                  detail: {
+                    pageId: pageData.id,
+                    contextLabel: `Posting to ${pageData.title || pageData.name || 'page'}`,
+                  },
+                }),
+              )}
+          >
+            <span class="material-symbols-outlined">edit</span>
+            New post on this page
+          </button>
           <FeedList
             {posts}
             loading={postsLoading}
@@ -485,5 +501,28 @@
     .page-info-section {
       padding: 0 var(--space-4) var(--space-4);
     }
+  }
+
+  .scope-compose-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    margin-block-end: var(--space-3);
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    border: 0;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .scope-compose-btn:hover {
+    background: var(--color-primary-hover);
+  }
+
+  .scope-compose-btn .material-symbols-outlined {
+    font-size: 18px;
   }
 </style>
