@@ -1330,8 +1330,19 @@ defmodule Hybridsocial.Federation.Inbox do
   defp update_remote_post(object, remote_identity) do
     case get_post_by_ap_id(object["id"]) do
       %Post{identity_id: identity_id} = post when identity_id == remote_identity.id ->
+        # Remote peers send HTML in the AP `content` field, so the
+        # plaintext column is the stripped version and the rendered
+        # column is the raw HTML — same split the create path uses
+        # in `Federation.ActivityMapper.to_post_base/1`. Without
+        # this, the markdown sanitizer in `Post.edit_changeset`
+        # would escape the HTML markup and the post would render
+        # with literal `<span>` tags after every remote edit.
+        raw_html = object["content"]
+        plaintext = Hybridsocial.Content.HtmlStripper.to_plaintext(raw_html)
+
         attrs = %{
-          "content" => object["content"],
+          "content" => plaintext,
+          "content_html" => raw_html,
           "sensitive" => object["sensitive"] || false,
           "spoiler_text" => object["summary"]
         }
