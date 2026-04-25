@@ -17,7 +17,20 @@ defmodule Hybridsocial.Trending do
   @max_limit 40
   @half_life_hours 6
   @min_unique_accounts_posts 3
-  @min_unique_accounts_hashtags 2
+
+  # Hashtag eligibility:
+  #   * `trending_hashtag_window_hours` — how far back to look. Defaults
+  #     to 168h (one week) so low-volume instances don't end up with an
+  #     empty trending list whenever a 24h window happens to be quiet.
+  #   * `trending_hashtag_min_accounts` — how many distinct authors must
+  #     have used the tag in that window. Defaults to 2 (rewards broad
+  #     usage over a single chatty account). Tiny instances should set
+  #     this to 1 via Admin → Settings so any actively-used tag surfaces.
+  defp hashtag_window_hours,
+    do: Hybridsocial.Config.get("trending_hashtag_window_hours", 168)
+
+  defp hashtag_min_accounts,
+    do: Hybridsocial.Config.get("trending_hashtag_min_accounts", 2)
 
   @doc """
   Computes trending posts based on recent engagement velocity,
@@ -204,7 +217,8 @@ defmodule Hybridsocial.Trending do
 
   defp opensearch_compute_trending_hashtags do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    cutoff = DateTime.add(now, -24, :hour)
+    cutoff = DateTime.add(now, -hashtag_window_hours(), :hour)
+    min_accounts = hashtag_min_accounts()
 
     query = %{
       query: %{
@@ -230,7 +244,7 @@ defmodule Hybridsocial.Trending do
         |> Repo.delete_all()
 
         buckets
-        |> Enum.filter(fn bucket -> bucket["doc_count"] >= @min_unique_accounts_hashtags end)
+        |> Enum.filter(fn bucket -> bucket["doc_count"] >= min_accounts end)
         |> Enum.each(fn bucket ->
           name = bucket["key"]
           post_count = bucket["doc_count"]
@@ -343,7 +357,9 @@ defmodule Hybridsocial.Trending do
 
   defp pg_compute_trending_hashtags do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
-    cutoff = DateTime.add(now, -24, :hour)
+    window_hours = hashtag_window_hours()
+    min_accounts = hashtag_min_accounts()
+    cutoff = DateTime.add(now, -window_hours, :hour)
 
     results =
       Hashtag
@@ -362,7 +378,7 @@ defmodule Hybridsocial.Trending do
       })
       |> having(
         [_h, _ph, p],
-        fragment("COUNT(DISTINCT ?)", p.identity_id) >= ^@min_unique_accounts_hashtags
+        fragment("COUNT(DISTINCT ?)", p.identity_id) >= ^min_accounts
       )
       |> Repo.all()
 
