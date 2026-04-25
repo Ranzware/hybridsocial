@@ -553,6 +553,13 @@ defmodule HybridsocialWeb.Router do
     get "/", CustomEmojiController, :index
   end
 
+  # Custom Badges (public read)
+  scope "/api/v1/badges", HybridsocialWeb.Api.V1 do
+    pipe_through :api
+
+    get "/", BadgeController, :index
+  end
+
   # Scheduled statuses (authenticated)
   scope "/api/v1", HybridsocialWeb.Api.V1 do
     pipe_through [:api, :authenticated]
@@ -901,6 +908,12 @@ defmodule HybridsocialWeb.Router do
     post "/custom_emojis", Admin.CustomEmojisController, :create
     patch "/custom_emojis/:id", Admin.CustomEmojisController, :update
     delete "/custom_emojis/:id", Admin.CustomEmojisController, :delete
+
+    # Custom badge catalog (admin CRUD; reads also public via /api/v1/badges)
+    get "/custom_badges", Admin.CustomBadgesController, :index
+    post "/custom_badges", Admin.CustomBadgesController, :create
+    patch "/custom_badges/:id", Admin.CustomBadgesController, :update
+    delete "/custom_badges/:id", Admin.CustomBadgesController, :delete
   end
 
   # Markers (authenticated)
