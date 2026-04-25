@@ -359,6 +359,7 @@ defmodule HybridsocialWeb.Api.V1.PageController do
       is_locked: page.is_locked,
       is_bot: page.is_bot,
       created_at: page.inserted_at,
+      followers_count: count_page_followers(page.id),
       organization: serialize_org(page.organization)
     }
 
@@ -367,6 +368,12 @@ defmodule HybridsocialWeb.Api.V1.PageController do
     else
       base
     end
+  end
+
+  defp count_page_followers(identity_id) do
+    Hybridsocial.Social.Follow
+    |> Ecto.Query.where([f], f.followee_id == ^identity_id and f.status == :accepted)
+    |> Hybridsocial.Repo.aggregate(:count)
   end
 
   defp serialize_org(nil), do: nil
