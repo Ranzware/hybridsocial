@@ -160,8 +160,15 @@ defmodule Hybridsocial.Auth do
 
   @doc "List all active sessions for an identity. Current session first, then by most recent activity."
   def list_sessions(identity_id) do
+    # Only the *currently usable* tokens count as a session. A row
+    # whose rotated_at has aged out of the grace window is dead even
+    # though we never set revoked_at on it (the rotation grace lets
+    # racing refreshes succeed without hard-revoking on rotation).
+    grace_cutoff = DateTime.add(DateTime.utc_now(), -@rotation_grace_seconds, :second)
+
     OAuthToken
     |> where([t], t.identity_id == ^identity_id and is_nil(t.revoked_at))
+    |> where([t], is_nil(t.rotated_at) or t.rotated_at >= ^grace_cutoff)
     |> order_by([t], desc_nulls_last: t.last_active_at)
     |> Repo.all()
   end
@@ -334,18 +341,20 @@ defmodule Hybridsocial.Auth do
   end
 
   defp enforce_session_limit(identity_id) do
-    active_count =
+    grace_cutoff = DateTime.add(DateTime.utc_now(), -@rotation_grace_seconds, :second)
+
+    active_query =
       OAuthToken
       |> where([t], t.identity_id == ^identity_id and is_nil(t.revoked_at))
-      |> Repo.aggregate(:count)
+      |> where([t], is_nil(t.rotated_at) or t.rotated_at >= ^grace_cutoff)
+
+    active_count = Repo.aggregate(active_query, :count)
 
     if active_count > @max_sessions_per_user do
-      # Revoke the oldest sessions beyond the limit
       excess = active_count - @max_sessions_per_user
 
       oldest_ids =
-        OAuthToken
-        |> where([t], t.identity_id == ^identity_id and is_nil(t.revoked_at))
+        active_query
         |> order_by([t], asc: t.last_active_at)
         |> limit(^excess)
         |> select([t], t.id)
@@ -360,15 +369,23 @@ defmodule Hybridsocial.Auth do
   end
 
   defp cleanup_revoked_tokens(identity_id) do
-    # Delete revoked tokens older than 30 days
-    cutoff = DateTime.add(DateTime.utc_now(), -30 * 86400, :second)
+    now = DateTime.utc_now()
+    revoked_cutoff = DateTime.add(now, -30 * 86400, :second)
+    rotated_cutoff = DateTime.add(now, -@rotation_grace_seconds, :second)
 
+    # Two classes of dead tokens to sweep:
+    # 1. Hard-revoked rows older than 30 days (logout / session
+    #    revocation / session-cap eviction).
+    # 2. Rotated rows past the grace window — these never get
+    #    revoked_at set under the new refresh flow, so without this
+    #    sweep they pile up on every refresh and surface as bogus
+    #    "active" sessions in the user's session list.
     OAuthToken
     |> where(
       [t],
       t.identity_id == ^identity_id and
-        not is_nil(t.revoked_at) and
-        t.revoked_at < ^cutoff
+        ((not is_nil(t.revoked_at) and t.revoked_at < ^revoked_cutoff) or
+           (not is_nil(t.rotated_at) and t.rotated_at < ^rotated_cutoff))
     )
     |> Repo.delete_all()
   end
