@@ -4,7 +4,7 @@
     label,
     size = 'sm'
   }: {
-    type: 'owner' | 'admin' | 'moderator' | 'editor' | 'bot' | 'verified_l1' | 'verified_l2' | 'verified_l3';
+    type: 'owner' | 'admin' | 'moderator' | 'editor' | 'bot' | 'verified_l0' | 'verified_l1' | 'verified_l2' | 'verified_l3';
     label?: string;
     size?: 'sm' | 'md';
   } = $props();
@@ -14,6 +14,7 @@
     admin: '/badges/AdminBadge.svg',
     moderator: '/badges/ModeratorBadge.svg',
     bot: '/badges/RobotBadge.svg',
+    verified_l0: '/badges/BasicBadge.svg',
     verified_l1: '/badges/InitBadge.svg',
     verified_l2: '/badges/ProBadge.svg',
     verified_l3: '/badges/MaxBadge.svg',
@@ -25,6 +26,7 @@
     moderator: 'Mod',
     editor: 'Editor',
     bot: 'Bot',
+    verified_l0: 'Basic',
     verified_l1: 'Verified',
     verified_l2: 'Verified',
     verified_l3: 'Verified Pro'

@@ -18,6 +18,7 @@ export type BadgeType =
   | 'owner'
   | 'moderator'
   | 'editor'
+  | 'verified_l0'
   | 'verified_l1'
   | 'verified_l2'
   | 'verified_l3';
@@ -28,6 +29,7 @@ export interface Badge {
 }
 
 const TIER_RANK: Record<string, number> = {
+  verified_l0: 0.5,
   verified_l1: 1,
   verified_l2: 2,
   verified_l3: 3,
