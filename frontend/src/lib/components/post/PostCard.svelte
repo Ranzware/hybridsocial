@@ -993,7 +993,7 @@
 
   .post-content {
     font-size: 15px;
-    line-height: 1.55;
+    line-height: 1.6;
     color: var(--color-text);
     word-break: break-word;
     overflow-wrap: break-word;
@@ -1156,7 +1156,7 @@
   }
 
   .post-content :global(p) {
-    margin-block: 0 0.5em;
+    margin-block: 0 0.85em;
   }
 
   .post-content :global(p:last-child) {
