@@ -989,7 +989,13 @@
     onkeydown={handleKeydown}
     onclick={handleEmojiClickOutside}
   >
-    <button type="button" class="composer-close" onclick={closeComposer} aria-label="Close composer">
+    <button
+      type="button"
+      class="composer-close"
+      onclick={closeComposer}
+      aria-label="Close composer"
+      title="Close (your draft is saved)"
+    >
       <span class="material-symbols-outlined">close</span>
     </button>
 
@@ -1232,6 +1238,9 @@
           class:tool-active={uploadedMedia.length > 0}
           onclick={triggerFileInput}
           aria-label="Attach media"
+          title={showPoll
+            ? 'Polls and media can\'t be combined'
+            : `Attach photo, video, or audio (up to ${maxMedia})`}
           disabled={showPoll || mediaUploading}
         >
           <span class="material-symbols-outlined tool-icon">image</span>
@@ -1245,6 +1254,11 @@
           onclick={togglePoll}
           aria-label="Add poll"
           aria-pressed={showPoll}
+          title={uploadedMedia.length > 0
+            ? 'Polls and media can\'t be combined'
+            : showPoll
+              ? 'Remove poll'
+              : 'Add a poll'}
           disabled={uploadedMedia.length > 0}
         >
           <span class="material-symbols-outlined tool-icon">ballot</span>
@@ -1259,6 +1273,7 @@
             onclick={() => showSchedule = !showSchedule}
             aria-label="Schedule post"
             aria-pressed={showSchedule}
+            title={showSchedule ? 'Cancel scheduling — post immediately' : 'Schedule for later'}
           >
             <span class="material-symbols-outlined tool-icon">schedule_send</span>
           </button>
@@ -1273,6 +1288,7 @@
             onclick={() => { showEmojiPicker = !showEmojiPicker; showGifPicker = false; }}
             aria-label="Insert emoji"
             aria-expanded={showEmojiPicker}
+            title={showEmojiPicker ? 'Close emoji picker' : 'Insert emoji'}
           >
             <span class="material-symbols-outlined tool-icon">mood</span>
           </button>
@@ -1304,6 +1320,7 @@
           class="visibility-select"
           bind:value={visibility}
           aria-label="Post visibility"
+          title="Who can see this post"
         >
           {#each visibilityOptions as opt (opt.value)}
             <option value={opt.value}>{opt.icon} {opt.label}</option>
@@ -1318,6 +1335,9 @@
           onclick={() => { showCW = !showCW; }}
           aria-label="Toggle NSFW warning"
           aria-pressed={showCW}
+          title={showCW
+            ? 'Remove NSFW warning'
+            : 'Add a content warning — readers tap to reveal'}
         >
           NSFW
         </button>
