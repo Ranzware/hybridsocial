@@ -133,10 +133,20 @@ defmodule HybridsocialWeb.Api.V1.TimelineController do
       {:ok, posts} ->
         serialized = PostSerializer.serialize_many(posts, current_identity_id: identity.id)
 
+        # Wrap in PaginatedResponse<T> shape so the frontend's
+        # `result.data` reads. Returning a bare array landed
+        # `result.data = undefined` and the list page rendered
+        # empty even when 20 member posts existed in DB.
+        next_cursor =
+          case List.last(serialized) do
+            nil -> nil
+            last -> last[:id] || last["id"]
+          end
+
         conn
         |> put_link_headers(serialized, "/api/v1/timelines/list/#{list_id}")
         |> put_status(:ok)
-        |> json(serialized)
+        |> json(%{data: serialized, next_cursor: next_cursor, prev_cursor: nil})
 
       {:error, :not_found} ->
         conn
