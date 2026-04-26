@@ -10,7 +10,6 @@
   import PostActions from './PostActions.svelte';
   import AdminPostActions from '$lib/components/admin/AdminPostActions.svelte';
   import QuoteCard from './QuoteCard.svelte';
-  import LinkPreview from './LinkPreview.svelte';
   import VerifiedBadge from '$lib/components/ui/VerifiedBadge.svelte';
   import RoleBadge from '$lib/components/ui/RoleBadge.svelte';
   import ProfileHoverCard from '$lib/components/ui/ProfileHoverCard.svelte';
@@ -81,6 +80,11 @@
   let filterMatch: FilterResult | null = $derived(matchFilters(post.content, post.spoiler_text, filterContext));
   let filterRevealed = $state(false);
   let showSensitive = $state(false);
+  // Hide the link-card image once the network reports it's bad. OG
+  // `og:image` URLs go stale (404, hot-link blocked, deleted asset)
+  // and the default <img> behaviour leaves a broken-image glyph in a
+  // 2:1 box.
+  let cardImageBroken = $state(false);
   let contentCollapsed = $state(!detail);
   let contentOverflows = $state(false);
   let contentEl: HTMLDivElement | undefined = $state();
@@ -579,9 +583,14 @@
 
           {#if post.card && !compact}
             <a href={post.card.url} class="link-card" target="_blank" rel="noopener noreferrer" onclick={(e) => e.stopPropagation()}>
-              {#if post.card.image}
+              {#if post.card.image && !cardImageBroken}
                 <div class="link-card-image">
-                  <img src={post.card.image} alt="" loading="lazy" />
+                  <img
+                    src={post.card.image}
+                    alt=""
+                    loading="lazy"
+                    onerror={() => (cardImageBroken = true)}
+                  />
                 </div>
               {/if}
               <div class="link-card-body">
