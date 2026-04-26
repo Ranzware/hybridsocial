@@ -428,18 +428,25 @@ defmodule Hybridsocial.Trending do
     :ok
   end
 
-  # Returns %{hashtag_id => [h-6, h-5, ..., h-0]} where each entry is the
-  # count of distinct posts carrying that hashtag within that hour.
+  # Returns %{hashtag_id => [d-6, d-5, ..., d-0]} where each entry is
+  # the count of distinct posts carrying that hashtag within that day
+  # (UTC). Daily buckets over the past 7 days line up with the
+  # default eligibility window (168 h), so a tag posted twice on
+  # different days now produces a line with actual shape — the older
+  # 7-hour version was almost always all-zero on small instances
+  # because the posts were older than 7 hours, and the rendered
+  # sparkline degenerated into a flat line at the chart edge.
   defp fetch_hashtag_history([], _now), do: %{}
 
   defp fetch_hashtag_history(hashtag_ids, now) do
-    history_cutoff = DateTime.add(now, -7, :hour)
+    history_cutoff = DateTime.add(now, -7, :day)
 
-    # Hour ordinals 0..6 where 0 is the oldest bucket we display.
-    # Floor `now` to the hour via Unix seconds, then subtract 6h so the
-    # last element is the current hour and index 0 is six hours back.
-    current_hour_unix = DateTime.to_unix(now) - rem(DateTime.to_unix(now), 3600)
-    base_hour = DateTime.from_unix!(current_hour_unix - 6 * 3600)
+    # Day ordinals 0..6 where 0 is six days ago and 6 is today (UTC).
+    # Floor `now` to the day via Unix seconds, then back up six days
+    # so the last index is today and the first is one week back.
+    seconds_per_day = 86_400
+    current_day_unix = DateTime.to_unix(now) - rem(DateTime.to_unix(now), seconds_per_day)
+    base_day = DateTime.from_unix!(current_day_unix - 6 * seconds_per_day)
 
     # `post_hashtags` is queried as a raw table source (no schema),
     # so Ecto has no type info for `ph.hashtag_id`. Without an
@@ -451,27 +458,26 @@ defmodule Hybridsocial.Trending do
       |> join(:inner, [p], ph in "post_hashtags", on: ph.post_id == p.id)
       |> where([p, ph], ph.hashtag_id in type(^hashtag_ids, {:array, Ecto.UUID}))
       |> where([p, _ph], p.inserted_at >= ^history_cutoff and is_nil(p.deleted_at))
-      |> group_by([p, ph], [ph.hashtag_id, fragment("date_trunc('hour', ?)", p.inserted_at)])
+      |> group_by([p, ph], [ph.hashtag_id, fragment("date_trunc('day', ?)", p.inserted_at)])
       |> select([p, ph], %{
         hashtag_id: ph.hashtag_id,
-        bucket: fragment("date_trunc('hour', ?)", p.inserted_at),
+        bucket: fragment("date_trunc('day', ?)", p.inserted_at),
         count: count(p.id, :distinct)
       })
       |> Repo.all()
 
     Enum.reduce(rows, %{}, fn row, acc ->
-      # `date_trunc('hour', inserted_at)` returns a NaiveDateTime
+      # `date_trunc('day', inserted_at)` returns a NaiveDateTime
       # because `inserted_at` is `timestamp without time zone`. Cast
-      # to UTC so DateTime.diff/3 doesn't FunctionClauseError on the
-      # mixed types (which silently masked the trending-hashtag
-      # compute on every instance with at least one eligible tag).
+      # to UTC before diffing — DateTime.diff/3 raises on mixed
+      # struct types.
       bucket_dt =
         case row.bucket do
           %DateTime{} = dt -> dt
           %NaiveDateTime{} = ndt -> DateTime.from_naive!(ndt, "Etc/UTC")
         end
 
-      bucket_index = DateTime.diff(bucket_dt, base_hour, :second) |> div(3600)
+      bucket_index = DateTime.diff(bucket_dt, base_day, :second) |> div(seconds_per_day)
 
       if bucket_index in 0..6 do
         series = Map.get(acc, row.hashtag_id) || List.duplicate(0, 7)
