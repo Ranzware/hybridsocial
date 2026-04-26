@@ -37,6 +37,9 @@ export interface Identity {
   domain?: string | null;
   display_name: string | null;
   bio: string | null;
+  /** Server-rendered safe HTML for the bio. Remote bios go through
+   *  HtmlSanitizeEx.basic_html; local bios are escaped + nl→<br>. */
+  bio_html?: string | null;
   avatar_url: string | null;
   header_url: string | null;
   is_locked: boolean;

@@ -412,6 +412,7 @@ defmodule HybridsocialWeb.Api.V1.AccountController do
       acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
       display_name: identity.display_name,
       bio: identity.bio,
+      bio_html: Hybridsocial.Accounts.bio_html(identity),
       avatar_url: identity.avatar_url,
       header_url: identity.header_url,
       is_locked: identity.is_locked,

@@ -6,6 +6,57 @@ defmodule Hybridsocial.Accounts do
   alias Hybridsocial.Repo
   alias Hybridsocial.Accounts.{Bot, Identity, Invite, User}
 
+  @doc """
+  Returns the bio rendered as safe HTML for display.
+
+  Remote actors federate `summary` as HTML — we used to drop that
+  HTML straight into the `bio` column and the frontend rendered it
+  with text interpolation, so users saw literal `<br/>` / `<a>` /
+  `&#39;` markup. Run remote bios through the basic scrubber so
+  links and line breaks survive but scripts/iframes don't.
+
+  Local bios are stored as plaintext (no markdown / HTML editor
+  yet) — escape special chars and convert newlines to `<br>` so
+  the same `{@html}` render path works for both.
+  """
+  def bio_html(%Identity{} = identity) do
+    bio = identity.bio || ""
+
+    cond do
+      bio == "" ->
+        ""
+
+      remote_actor?(identity) or String.contains?(bio, "<") ->
+        # Remote bios arrive as HTML; sanitize and ship.
+        # Local bios with `<` shouldn't happen but defensively pass
+        # them through the same scrubber so we never emit raw markup
+        # we didn't approve.
+        HtmlSanitizeEx.basic_html(bio)
+
+      true ->
+        bio
+        |> escape_html()
+        |> String.replace("\n", "<br>")
+    end
+  end
+
+  def bio_html(_), do: ""
+
+  defp escape_html(s) do
+    s
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&#39;")
+  end
+
+  defp remote_actor?(%Identity{ap_actor_url: url}) when is_binary(url) do
+    not Hybridsocial.Federation.LocalUrl.local_actor_url?(url)
+  end
+
+  defp remote_actor?(_), do: false
+
   # --- Identity queries ---
 
   def get_identity(id) do

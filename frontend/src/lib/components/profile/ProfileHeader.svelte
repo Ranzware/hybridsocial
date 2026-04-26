@@ -224,7 +224,11 @@
       {/if}
     </div>
 
-    {#if account.bio}
+    {#if account.bio_html}
+      <!-- bio_html is server-sanitized via HtmlSanitizeEx.basic_html
+           (remote bios) or escaped + nl→<br> (local plaintext bios). -->
+      <div class="profile-bio">{@html account.bio_html}</div>
+    {:else if account.bio}
       <p class="profile-bio">{account.bio}</p>
     {/if}
 

@@ -309,6 +309,12 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
       avatar_url: identity.avatar_url,
       header_url: Map.get(identity, :header_url, nil),
       bio: Map.get(identity, :bio, nil),
+      bio_html:
+        if is_struct(identity, Hybridsocial.Accounts.Identity) do
+          Hybridsocial.Accounts.bio_html(identity)
+        else
+          nil
+        end,
       is_bot: Map.get(identity, :is_bot, false),
       is_locked: Map.get(identity, :is_locked, false),
       badges: badges,
