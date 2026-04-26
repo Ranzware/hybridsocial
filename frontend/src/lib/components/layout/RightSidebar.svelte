@@ -138,6 +138,17 @@
       .join(' ');
   }
 
+  // Skip the sparkline when there's no variation across the 7-h
+  // window — every bucket the same value (usually all zeros for tags
+  // posted more than 7 h ago) renders as a meaningless flat line at
+  // the chart edge. Better to draw nothing than visual noise.
+  function hasSparklineSignal(history: number[]): boolean {
+    if (!history || history.length < 2) return false;
+    const max = Math.max(...history);
+    const min = Math.min(...history);
+    return max > min;
+  }
+
   function plural(n: number, one: string, many: string): string {
     return `${n} ${n === 1 ? one : many}`;
   }
@@ -179,7 +190,7 @@
                 <span class="trend-tag">#{item.tag}</span>
                 <span class="trend-meta">{plural(item.people, 'person talking', 'people talking')}</span>
               </div>
-              {#if item.history.length > 1}
+              {#if hasSparklineSignal(item.history)}
                 <svg class="trend-spark" viewBox="0 0 56 24" preserveAspectRatio="none" aria-hidden="true">
                   <polyline points={sparklinePath(item.history)} fill="none" stroke="var(--color-primary)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
