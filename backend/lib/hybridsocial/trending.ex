@@ -449,7 +449,18 @@ defmodule Hybridsocial.Trending do
       |> Repo.all()
 
     Enum.reduce(rows, %{}, fn row, acc ->
-      bucket_index = DateTime.diff(row.bucket, base_hour, :second) |> div(3600)
+      # `date_trunc('hour', inserted_at)` returns a NaiveDateTime
+      # because `inserted_at` is `timestamp without time zone`. Cast
+      # to UTC so DateTime.diff/3 doesn't FunctionClauseError on the
+      # mixed types (which silently masked the trending-hashtag
+      # compute on every instance with at least one eligible tag).
+      bucket_dt =
+        case row.bucket do
+          %DateTime{} = dt -> dt
+          %NaiveDateTime{} = ndt -> DateTime.from_naive!(ndt, "Etc/UTC")
+        end
+
+      bucket_index = DateTime.diff(bucket_dt, base_hour, :second) |> div(3600)
 
       if bucket_index in 0..6 do
         series = Map.get(acc, row.hashtag_id) || List.duplicate(0, 7)
