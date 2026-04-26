@@ -31,7 +31,10 @@ defmodule Hybridsocial.Accounts do
         # Local bios with `<` shouldn't happen but defensively pass
         # them through the same scrubber so we never emit raw markup
         # we didn't approve.
-        HtmlSanitizeEx.basic_html(bio)
+        bio
+        |> HtmlSanitizeEx.basic_html()
+        |> harden_links()
+        |> proxy_images()
 
       true ->
         bio
@@ -49,6 +52,34 @@ defmodule Hybridsocial.Accounts do
     |> String.replace(">", "&gt;")
     |> String.replace("\"", "&quot;")
     |> String.replace("'", "&#39;")
+  end
+
+  # `HtmlSanitizeEx.basic_html` strips dangerous attributes and tags,
+  # but it doesn't add the rel/target hardening every fediverse client
+  # ships on user-content links: noopener (blocks reverse-tabnab via
+  # window.opener), noreferrer (no Referer leak to the link target),
+  # nofollow (PageRank hygiene for spam), ugc (Google's
+  # user-generated-content marker), plus target=_blank so a malicious
+  # bio link can't navigate the user away from the profile page.
+  defp harden_links(html) do
+    Regex.replace(~r/<a\b([^>]*)>/i, html, fn _full, attrs ->
+      attrs = String.trim(attrs)
+      attrs = Regex.replace(~r/\s+(target|rel)\s*=\s*"[^"]*"/i, attrs, "")
+      attrs = if attrs == "", do: "", else: " " <> attrs
+      "<a#{attrs} rel=\"nofollow noopener noreferrer ugc\" target=\"_blank\">"
+    end)
+  end
+
+  # Route every external <img src> through our media proxy so a remote
+  # bio can't drop a tracking pixel onto every viewer's browser. The
+  # proxy fetches and caches the asset server-side, so the user's IP
+  # never reaches the source host. `MediaProxy.url/1` is a no-op for
+  # URLs already on our domain.
+  defp proxy_images(html) do
+    Regex.replace(~r/<img\b([^>]*?)\bsrc\s*=\s*"([^"]+)"([^>]*)>/i, html, fn _full, before_attrs, src, after_attrs ->
+      proxied = Hybridsocial.Media.MediaProxy.url(src)
+      "<img#{before_attrs} src=\"#{proxied}\"#{after_attrs}>"
+    end)
   end
 
   defp remote_actor?(%Identity{ap_actor_url: url}) when is_binary(url) do
