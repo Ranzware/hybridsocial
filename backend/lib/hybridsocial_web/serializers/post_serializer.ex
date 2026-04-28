@@ -8,7 +8,7 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
   import Ecto.Query
 
   alias Hybridsocial.Repo
-  alias Hybridsocial.Social.{Reaction, Boost, Bookmark, PostMute}
+  alias Hybridsocial.Social.{Reaction, Boost, Bookmark, PostMute, Poll, PollOption, PollVote}
   alias Hybridsocial.Media.MediaFile
   alias Hybridsocial.Content.{LinkPreviews, CustomEmoji}
 
@@ -157,6 +157,7 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
       emojis: emojis,
       reactions: reactions,
       media_attachments: media_attachments,
+      poll: poll_for(post, current_identity_id),
       group: group_summary_for(post),
       page: page_summary_for(post)
     }
@@ -274,6 +275,7 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
         emojis: emojis,
         reactions: Map.get(reactions_breakdown, post.id, []),
         media_attachments: Map.get(media_by_post, post.id, []),
+        poll: poll_for(post, current_identity_id),
         group: group_summary_for(post),
         page: page_summary_for(post)
       }
@@ -459,6 +461,80 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
   end
 
   defp batch_reactions(_, _), do: %{}
+
+  # Polls. Skip the lookup for non-poll posts so the home feed
+  # doesn't pay an N+1 hit per row. For poll posts (local OR remote
+  # — both flavours land in the same table now that
+  # Federation.Inbox.persist_remote_poll runs on ingest) we shape
+  # the row into the Mastodon-style `poll` object the frontend's
+  # `Poll` type expects: `multiple` (not multiple_choice),
+  # `expired` boolean, `options[].title` (not `text`), per-viewer
+  # `voted` and `own_votes` indices.
+  defp poll_for(%{post_type: "poll", id: post_id}, viewer_id) do
+    case Repo.one(from p in Poll, where: p.post_id == ^post_id) do
+      nil ->
+        nil
+
+      poll ->
+        options =
+          PollOption
+          |> where([o], o.poll_id == ^poll.id)
+          |> order_by([o], asc: o.position)
+          |> Repo.all()
+
+        own_votes =
+          if viewer_id do
+            from(v in PollVote,
+              where: v.poll_id == ^poll.id and v.identity_id == ^viewer_id,
+              select: v.option_id
+            )
+            |> Repo.all()
+          else
+            []
+          end
+
+        own_indices =
+          options
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {opt, idx} ->
+            if opt.id in own_votes, do: [idx], else: []
+          end)
+
+        votes_count = Enum.reduce(options, 0, fn o, acc -> acc + (o.votes_count || 0) end)
+
+        %{
+          id: poll.id,
+          expires_at: poll.expires_at,
+          expired: poll_expired?(poll.expires_at),
+          multiple: poll.multiple_choice,
+          votes_count: votes_count,
+          voters_count: poll.voters_count,
+          voted: own_indices != [],
+          own_votes: own_indices,
+          options:
+            Enum.map(options, fn o ->
+              %{title: o.text, votes_count: o.votes_count}
+            end)
+        }
+    end
+  end
+
+  defp poll_for(_post, _viewer_id), do: nil
+
+  defp poll_expired?(nil), do: false
+
+  defp poll_expired?(%DateTime{} = expires_at) do
+    DateTime.compare(DateTime.utc_now(), expires_at) == :gt
+  end
+
+  defp poll_expired?(%NaiveDateTime{} = expires_at) do
+    case DateTime.from_naive(expires_at, "Etc/UTC") do
+      {:ok, dt} -> DateTime.compare(DateTime.utc_now(), dt) == :gt
+      _ -> false
+    end
+  end
+
+  defp poll_expired?(_), do: false
 
   defp card_for(post) do
     # Wrap in rescue: a misbehaving link preview (varchar overflow,
