@@ -7,8 +7,22 @@
   import type { Post, MediaAttachment, Identity, PostDraft } from '$lib/api/types.js';
   import { createDraft, updateDraft, getDraft, deleteDraft } from '$lib/api/drafts.js';
   import { currentUser, authStore } from '$lib/stores/auth.js';
+  import { preferencesStore } from '$lib/stores/preferences.js';
   import EmojiPicker from './EmojiPicker.svelte';
   import { markSeen } from '$lib/utils/seen-posts.js';
+
+  type ComposerVisibility = 'public' | 'followers' | 'direct';
+
+  // The user's saved default — set in /settings/privacy and persisted
+  // both to localStorage (preferencesStore) and to the server
+  // (users.default_visibility, returned from /auth/me). Falls back to
+  // 'public' if the preference isn't a value the composer understands
+  // (e.g. an admin-set 'unlisted' which we don't expose in the UI).
+  function defaultVisibility(): ComposerVisibility {
+    const pref = get(preferencesStore).default_visibility;
+    if (pref === 'public' || pref === 'followers' || pref === 'direct') return pref;
+    return 'public';
+  }
 
   // `showFab` hides the floating "new post" button on routes where
   // composing from scratch doesn't make sense (DMs, settings, admin)
@@ -19,7 +33,7 @@
 
   let isOpen = $state(false);
   let content = $state('');
-  let visibility = $state<'public' | 'followers' | 'direct'>('public');
+  let visibility = $state<ComposerVisibility>(defaultVisibility());
   let spoilerText = $state('');
   let showCW = $state(false);
   let loading = $state(false);
@@ -353,6 +367,10 @@
     content = '';
     spoilerText = '';
     showCW = false;
+    // Snap back to the user's saved default for the *next* compose
+    // session — so a one-off "this thread is followers-only" doesn't
+    // become sticky after the post is sent.
+    visibility = defaultVisibility();
     replyTo = null;
     targetMediaId = null;
     targetMediaIndex = null;
@@ -400,6 +418,48 @@
     fraction: number;
   };
   let uploadingProgress = $state<UploadProgress[]>([]);
+
+  // Drag/drop state. We track a depth counter rather than just a
+  // boolean because dragenter/dragleave fire as the cursor crosses
+  // child elements, and a naive flag would flicker as the user
+  // moved over the textarea / toolbar nested inside the panel.
+  let dragDepth = $state(0);
+  let isDragOver = $derived(dragDepth > 0);
+
+  function hasFiles(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    if (!types) return false;
+    // `Array.from` so we can call includes regardless of the runtime
+    // returning a DOMStringList (some browsers) vs an array (most).
+    return Array.from(types).includes('Files');
+  }
+
+  function handleDragEnter(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+  }
+
+  function handleDragOver(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  }
+
+  function handleDragLeave(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+  }
+
+  async function handleDrop(e: DragEvent) {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length === 0) return;
+    await uploadFiles(files);
+  }
 
   // Shared upload path so the file-picker, drag-drop, and paste-image
   // entry points all enforce the same per-post cap, the same error
@@ -1042,12 +1102,23 @@
     class:composer-opened={hasOpened}
     class:composer-panel-fadeout={isClosing}
     class:composer-nudge={isNudging}
+    class:composer-drag-over={isDragOver}
     role="dialog"
     aria-label="Compose post"
     aria-modal="true"
     onkeydown={handleKeydown}
     onclick={handleEmojiClickOutside}
+    ondragenter={handleDragEnter}
+    ondragover={handleDragOver}
+    ondragleave={handleDragLeave}
+    ondrop={handleDrop}
   >
+    {#if isDragOver}
+      <div class="composer-drop-overlay" aria-hidden="true">
+        <span class="material-symbols-outlined composer-drop-icon">upload_file</span>
+        <span class="composer-drop-text">Drop files to upload</span>
+      </div>
+    {/if}
     <button
       type="button"
       class="composer-close"
@@ -1615,6 +1686,57 @@
 
   .fab-icon {
     font-size: 24px;
+  }
+
+  /* Drop zone — shown only while a file is being dragged over the
+     composer. The overlay sits above the composer body so the user
+     sees an unambiguous target, but `pointer-events: none` ensures
+     dragleave/drop still fire on the panel itself. */
+  .composer-drop-overlay {
+    position: absolute;
+    inset: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    background: color-mix(in oklab, var(--color-primary) 12%, transparent);
+    border: 2px dashed var(--color-primary);
+    border-radius: var(--radius-lg);
+    color: var(--color-primary);
+    z-index: 5;
+    pointer-events: none;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: composer-drop-in 120ms ease;
+  }
+
+  @keyframes composer-drop-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .composer-drop-icon {
+    font-size: 48px !important;
+  }
+
+  .composer-drop-text {
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .composer-panel.composer-drag-over {
+    box-shadow: 0 0 0 2px var(--color-primary), var(--shadow-xl);
+  }
+
+  /* On mobile the BottomTabs bar already has a Compose button in
+     the centre, so the floating FAB is redundant — and worse, it
+     sits on top of the per-post action ⋯ menu and a post's right
+     edge. Hide it at the same breakpoint that shows BottomTabs. */
+  @media (max-width: 768px) {
+    .fab {
+      display: none;
+    }
   }
 
   /* ---- Backdrop ---- */

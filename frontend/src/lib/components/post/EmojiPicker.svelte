@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from '$lib/api/client.js';
+  import { EMOJI_GROUPS, type EmojiEntry } from '$lib/data/emoji-catalog.js';
 
   let {
     onselect,
@@ -15,41 +16,65 @@
   }
 
   let customEmojis = $state<CustomEmoji[]>([]);
-  let loading = $state(true);
-  let activeTab = $state<string>('quick');
+  let loadingCustom = $state(true);
+  let activeTab = $state<string>(EMOJI_GROUPS[0].id);
+  let query = $state('');
 
-  const quickEmojis = [
-    { char: '\u{1F600}', label: 'Grinning' },
-    { char: '\u{2764}\u{FE0F}', label: 'Heart' },
-    { char: '\u{1F917}', label: 'Hugging' },
-    { char: '\u{1F621}', label: 'Angry' },
-    { char: '\u{1F622}', label: 'Crying' },
-    { char: '\u{1F602}', label: 'Laughing' },
-    { char: '\u{1F92F}', label: 'Mind Blown' },
-  ];
-
-  let categories = $derived(() => {
+  // Custom emojis are folded in as one or more extra tabs grouped by
+  // their `category` (Uncategorized when unset). Available to every
+  // user — server returns the full catalog regardless of tier.
+  let customCategories = $derived.by(() => {
     const cats = new Set<string>();
-    for (const e of customEmojis) {
-      cats.add(e.category || 'Uncategorized');
-    }
+    for (const ce of customEmojis) cats.add(ce.category || 'Custom');
     return Array.from(cats).sort();
   });
 
-  let filteredEmojis = $derived(() => {
-    if (activeTab === 'quick') return [];
-    return customEmojis.filter(
-      (e) => (e.category || 'Uncategorized') === activeTab
-    );
+  let customByCategory = $derived.by(() => {
+    const map = new Map<string, CustomEmoji[]>();
+    for (const ce of customEmojis) {
+      const key = ce.category || 'Custom';
+      const list = map.get(key) ?? [];
+      list.push(ce);
+      map.set(key, list);
+    }
+    return map;
   });
 
-  let tabs = $derived(() => {
-    const result: string[] = ['quick'];
-    if (customEmojis.length > 0) {
-      result.push(...categories());
+  // Build a flat searchable list once so the filter can scan both
+  // native and custom emojis at the same time without rebuilding
+  // structures on every keystroke.
+  interface SearchableNative { kind: 'native'; entry: EmojiEntry }
+  interface SearchableCustom { kind: 'custom'; entry: CustomEmoji }
+  type Searchable = SearchableNative | SearchableCustom;
+
+  let searchIndex = $derived.by<Searchable[]>(() => {
+    const out: Searchable[] = [];
+    for (const group of EMOJI_GROUPS) {
+      for (const entry of group.emojis) out.push({ kind: 'native', entry });
     }
-    return result;
+    for (const ce of customEmojis) out.push({ kind: 'custom', entry: ce });
+    return out;
   });
+
+  let filteredResults = $derived.by<Searchable[]>(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return searchIndex.filter((item) => {
+      const haystack =
+        item.kind === 'native'
+          ? item.entry.name
+          : `${item.entry.shortcode} ${item.entry.category ?? ''}`.toLowerCase();
+      return tokens.every((t) => haystack.includes(t));
+    });
+  });
+
+  let activeNativeGroup = $derived(
+    EMOJI_GROUPS.find((g) => g.id === activeTab) ?? null,
+  );
+  let activeCustomList = $derived(
+    customByCategory.get(activeTab) ?? null,
+  );
 
   onMount(async () => {
     try {
@@ -57,67 +82,125 @@
     } catch {
       customEmojis = [];
     } finally {
-      loading = false;
+      loadingCustom = false;
     }
   });
 
-  function handleQuickSelect(char: string) {
+  function pickNative(char: string) {
     onselect(char);
   }
 
-  function handleCustomSelect(shortcode: string) {
+  function pickCustom(shortcode: string) {
     onselect(`:${shortcode}:`);
   }
 </script>
 
 <div class="emoji-picker" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Emoji picker">
-  <div class="emoji-tabs">
-    {#each tabs() as tab (tab)}
-      <button
-        type="button"
-        class="emoji-tab"
-        class:emoji-tab-active={activeTab === tab}
-        onclick={() => { activeTab = tab; }}
-      >
-        {tab === 'quick' ? 'Quick' : tab}
-      </button>
-    {/each}
+  <div class="emoji-search">
+    <span class="material-symbols-outlined emoji-search-icon" aria-hidden="true">search</span>
+    <input
+      type="search"
+      class="emoji-search-input"
+      bind:value={query}
+      placeholder="Search emojis"
+      aria-label="Search emojis"
+    />
   </div>
 
+  {#if !query}
+    <div class="emoji-tabs" role="tablist">
+      {#each EMOJI_GROUPS as group (group.id)}
+        <button
+          type="button"
+          class="emoji-tab"
+          class:emoji-tab-active={activeTab === group.id}
+          onclick={() => { activeTab = group.id; }}
+          role="tab"
+          aria-selected={activeTab === group.id}
+          title={group.label}
+        >
+          {group.label}
+        </button>
+      {/each}
+      {#each customCategories as cat (cat)}
+        <button
+          type="button"
+          class="emoji-tab"
+          class:emoji-tab-active={activeTab === cat}
+          onclick={() => { activeTab = cat; }}
+          role="tab"
+          aria-selected={activeTab === cat}
+          title={cat}
+        >
+          {cat}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="emoji-grid-container">
-    {#if activeTab === 'quick'}
+    {#if query}
+      {#if filteredResults.length === 0}
+        <p class="emoji-empty">No matches.</p>
+      {:else}
+        <div class="emoji-grid">
+          {#each filteredResults as item (item.kind === 'native' ? item.entry.char : item.entry.shortcode)}
+            {#if item.kind === 'native'}
+              <button
+                type="button"
+                class="emoji-item"
+                onclick={() => pickNative(item.entry.char)}
+                title={item.entry.name}
+                aria-label={item.entry.name}
+              >
+                {item.entry.char}
+              </button>
+            {:else}
+              <button
+                type="button"
+                class="emoji-item emoji-item-custom"
+                onclick={() => pickCustom(item.entry.shortcode)}
+                title={`:${item.entry.shortcode}:`}
+                aria-label={item.entry.shortcode}
+              >
+                <img src={item.entry.url} alt={`:${item.entry.shortcode}:`} class="emoji-img" loading="lazy" />
+              </button>
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    {:else if activeNativeGroup}
       <div class="emoji-grid">
-        {#each quickEmojis as emoji (emoji.char)}
+        {#each activeNativeGroup.emojis as entry (entry.char)}
           <button
             type="button"
             class="emoji-item"
-            onclick={() => handleQuickSelect(emoji.char)}
-            title={emoji.label}
-            aria-label={emoji.label}
+            onclick={() => pickNative(entry.char)}
+            title={entry.name}
+            aria-label={entry.name}
           >
-            {emoji.char}
+            {entry.char}
           </button>
         {/each}
       </div>
-    {:else if loading}
-      <div class="emoji-loading">Loading...</div>
-    {:else}
+    {:else if loadingCustom}
+      <div class="emoji-loading">Loading…</div>
+    {:else if activeCustomList && activeCustomList.length > 0}
       <div class="emoji-grid">
-        {#each filteredEmojis() as emoji (emoji.shortcode)}
+        {#each activeCustomList as ce (ce.shortcode)}
           <button
             type="button"
             class="emoji-item emoji-item-custom"
-            onclick={() => handleCustomSelect(emoji.shortcode)}
-            title=":{emoji.shortcode}:"
-            aria-label={emoji.shortcode}
+            onclick={() => pickCustom(ce.shortcode)}
+            title={`:${ce.shortcode}:`}
+            aria-label={ce.shortcode}
           >
-            <img src={emoji.url} alt=":{emoji.shortcode}:" class="emoji-img" loading="lazy" />
+            <img src={ce.url} alt={`:${ce.shortcode}:`} class="emoji-img" loading="lazy" />
           </button>
         {/each}
-        {#if filteredEmojis().length === 0}
-          <p class="emoji-empty">No emojis in this category.</p>
-        {/if}
       </div>
+    {:else}
+      <p class="emoji-empty">No emojis in this category.</p>
     {/if}
   </div>
 </div>
@@ -128,8 +211,8 @@
     inset-block-end: 100%;
     inset-inline-start: 0;
     margin-block-end: var(--space-2);
-    width: 280px;
-    max-height: 300px;
+    width: 340px;
+    max-height: 380px;
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
@@ -149,6 +232,35 @@
       opacity: 1;
       transform: translateY(0);
     }
+  }
+
+  .emoji-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-block-end: 1px solid var(--color-border);
+  }
+
+  .emoji-search-icon {
+    font-size: 18px;
+    color: var(--color-text-tertiary);
+    flex-shrink: 0;
+  }
+
+  .emoji-search-input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: transparent;
+    color: var(--color-text);
+    font: inherit;
+    font-size: 0.85rem;
+    outline: none;
+  }
+
+  .emoji-search-input::-webkit-search-cancel-button {
+    cursor: pointer;
   }
 
   .emoji-tabs {
@@ -195,7 +307,7 @@
 
   .emoji-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(8, 1fr);
     gap: var(--space-1);
   }
 
@@ -203,13 +315,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
+    width: 100%;
     height: 34px;
     border: none;
     background: transparent;
     border-radius: var(--radius-md);
     cursor: pointer;
-    font-size: 1.25rem;
+    font-size: 1.35rem;
     line-height: 1;
     transition: background-color 0.1s ease, transform 0.1s ease;
   }
