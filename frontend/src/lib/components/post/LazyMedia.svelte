@@ -201,7 +201,10 @@
     display: block;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* contain (not cover) so a portrait video inside the post-card's
+       capped 4:3 cell shows the full frame with black bars instead
+       of being clipped top/bottom. */
+    object-fit: contain;
     background: black;
   }
 </style>

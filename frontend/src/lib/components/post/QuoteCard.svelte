@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Post } from '$lib/api/types.js';
+  import { goto } from '$app/navigation';
   import { relativeTime, fullDateTime } from '$lib/utils/time.js';
   import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
 
@@ -16,14 +17,14 @@
 
   function navigateToQuote(e: MouseEvent) {
     e.stopPropagation();
-    window.location.href = `/post/${post.id}`;
+    goto(`/post/${post.id}`);
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       e.stopPropagation();
-      window.location.href = `/post/${post.id}`;
+      goto(`/post/${post.id}`);
     }
   }
 </script>

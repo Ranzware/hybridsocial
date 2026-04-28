@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Post } from '$lib/api/types.js';
+  import { goto } from '$app/navigation';
   import { relativeTime, fullDateTime } from '$lib/utils/time.js';
   import { editPost, getPost } from '$lib/api/statuses.js';
   import { uploadMedia } from '$lib/api/media.js';
@@ -64,6 +65,8 @@
   import { markSeen } from '$lib/utils/seen-posts.js';
   import AccountTypeIndicator from '$lib/components/ui/AccountTypeIndicator.svelte';
   import LazyMedia from '$lib/components/post/LazyMedia.svelte';
+  import YouTubeEmbed from '$lib/components/post/YouTubeEmbed.svelte';
+  import { parseYouTubeUrl, findYouTubeInContent } from '$lib/utils/youtube.js';
 
   let {
     post,
@@ -85,6 +88,13 @@
   // and the default <img> behaviour leaves a broken-image glyph in a
   // 2:1 box.
   let cardImageBroken = $state(false);
+  // Prefer the link-card URL (already validated and previewed by the
+  // backend) but fall back to scanning content — YouTube blocks our
+  // OG fetcher often enough that `post.card` may be null even when a
+  // valid YouTube URL is in the body.
+  let youtubeRef = $derived(
+    parseYouTubeUrl(post.card?.url ?? '') ?? findYouTubeInContent(post.content)
+  );
   let contentCollapsed = $state(!detail);
   let contentOverflows = $state(false);
   let contentEl: HTMLDivElement | undefined = $state();
@@ -188,7 +198,9 @@
       parentLightboxOpen = true;
     } catch {
       // Parent fetch failed — fall back to navigating to the post.
-      window.location.href = `/post/${post.parent_id}`;
+      // Use goto so SvelteKit can restore scroll on back-nav; a full
+      // page reload throws the feed scroll position away.
+      goto(`/post/${post.parent_id}`);
     } finally {
       parentLightboxLoading = false;
     }
@@ -417,7 +429,11 @@
 
   function navigateToPost() {
     markSeen(post.id);
-    window.location.href = `/post/${post.id}`;
+    // SPA navigate so the browser keeps the previous page (and its
+    // scroll position) in history. `window.location.href` triggers a
+    // full reload, after which SvelteKit's scroll restoration has
+    // nothing to restore — the feed snaps to the top on back.
+    goto(`/post/${post.id}`);
   }
 
   function handleCardClick(e: MouseEvent) {
@@ -616,6 +632,7 @@
                 <div
                   class="media-item"
                   class:media-audio={media.type === 'audio'}
+                  class:media-video-cell={media.type === 'video'}
                   class:media-clickable={clickable}
                   role={clickable ? 'button' : undefined}
                   tabindex={clickable ? 0 : undefined}
@@ -691,7 +708,9 @@
             <QuoteCard post={post.quote} />
           {/if}
 
-          {#if post.card && !compact && mediaAttachments.length === 0}
+          {#if youtubeRef && !compact && mediaAttachments.length === 0}
+            <YouTubeEmbed ref={youtubeRef} title={post.card?.title ?? ''} />
+          {:else if post.card && !compact && mediaAttachments.length === 0}
             <a href={post.card.url} class="link-card" target="_blank" rel="noopener noreferrer" onclick={(e) => e.stopPropagation()}>
               {#if post.card.image && !cardImageBroken}
                 <div class="link-card-image">
@@ -795,6 +814,7 @@
   <ImageLightbox
     images={lightboxImages}
     bind:index={lightboxIndex}
+    postId={post.id}
     onclose={() => (lightboxOpen = false)}
     onreply={(mediaId, mediaIndex) => {
       lightboxOpen = false;
@@ -816,6 +836,7 @@
   <ImageLightbox
     images={parentLightboxImages}
     bind:index={parentLightboxIndex}
+    postId={post.parent_id ?? undefined}
     onclose={() => (parentLightboxOpen = false)}
   />
 {/if}
@@ -2031,6 +2052,28 @@
     position: relative;
     overflow: hidden;
     background: var(--color-surface);
+    /* Cap any feed-card media (image, video, NSFW spoiler block) at
+       a fixed aspect so a tall portrait or screenshot can't blow the
+       post out to multiple screens of height. The full image is
+       still reachable via the lightbox / post detail. */
+    aspect-ratio: 16 / 9;
+    max-height: 500px;
+  }
+
+  /* Single-image / single-media posts can lean a touch taller than
+     16:9 — feels right for portrait photos without producing a
+     mile-long card. */
+  .media-grid-1 .media-item {
+    aspect-ratio: 4 / 3;
+    max-height: 560px;
+  }
+
+  /* Video cells letterbox instead of cropping — clipping someone's
+     subject out of frame is much worse for video than for a static
+     image, where the user can click to expand. The black background
+     fills the unused area inside the capped cell. */
+  .media-item.media-video-cell {
+    background: #000;
   }
 
   .media-clickable {

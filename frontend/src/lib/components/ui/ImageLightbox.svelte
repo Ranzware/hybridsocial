@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import { goto } from '$app/navigation';
   import ReactionPicker from '$lib/components/post/ReactionPicker.svelte';
   import { premiumCatalog, ensurePremiumCatalog } from '$lib/stores/reaction-catalog.js';
+  import { getPostContext } from '$lib/api/statuses.js';
+  import type { Post } from '$lib/api/types.js';
+  import { relativeTime } from '$lib/utils/time.js';
 
   interface Slide {
     url: string;
@@ -21,12 +25,19 @@
   let {
     images,
     index = $bindable(0),
+    postId,
     onclose,
     onreply,
     onreact,
   }: {
     images: Slide[];
     index?: number;
+    /**
+     * Parent post id. When supplied alongside a slide that has an `id`,
+     * the lightbox fetches replies pinned to the current image and
+     * shows them in a side panel (auto-hidden when none exist).
+     */
+    postId?: string;
     onclose: () => void;
     /**
      * If supplied, the lightbox surfaces a "Reply to this image"
@@ -73,6 +84,64 @@
   let current = $derived(images[index] ?? images[0]);
   let hasPrev = $derived(index > 0);
   let hasNext = $derived(index < images.length - 1);
+
+  // Per-image replies sidebar. Cached by media id so flipping back
+  // to a slide we've already loaded doesn't refetch. Only populated
+  // when both `postId` and `current.id` are present — drives the
+  // panel's visibility (hidden when the array is empty for the
+  // current slide).
+  let repliesByMedia = $state<Record<string, Post[]>>({});
+  let repliesLoading = $state(false);
+  let currentReplies = $derived(
+    current?.id ? (repliesByMedia[current.id] ?? []) : [],
+  );
+  let showSidebar = $derived(currentReplies.length > 0);
+
+  $effect(() => {
+    const mediaId = current?.id;
+    if (!postId || !mediaId) return;
+    // Avoid re-fetching when we already have a result for this slide.
+    if (untrack(() => repliesByMedia[mediaId] !== undefined)) return;
+    let cancelled = false;
+    repliesLoading = true;
+    getPostContext(postId, { mediaId })
+      .then((ctx) => {
+        if (cancelled) return;
+        // Backend returns the full subtree for the targeted image.
+        // Show only direct replies in the panel — nested threads stay
+        // accessible via clicking through to the post detail.
+        const direct = (ctx.descendants || []).filter(
+          (d) => d.parent_id === postId && !d.tombstone,
+        );
+        repliesByMedia = { ...repliesByMedia, [mediaId]: direct };
+      })
+      .catch(() => {
+        if (cancelled) return;
+        repliesByMedia = { ...repliesByMedia, [mediaId]: [] };
+      })
+      .finally(() => {
+        if (!cancelled) repliesLoading = false;
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  function handleNewReply(e: Event) {
+    const reply = (e as CustomEvent<Post>).detail;
+    if (!reply || !postId) return;
+    if (reply.parent_id !== postId) return;
+    const mediaId = reply.target_media_id;
+    if (!mediaId) return;
+    const existing = repliesByMedia[mediaId] ?? [];
+    if (existing.some((r) => r.id === reply.id)) return;
+    repliesByMedia = { ...repliesByMedia, [mediaId]: [...existing, reply] };
+  }
+
+  function openReplyDetail(replyId: string) {
+    onclose();
+    goto(`/post/${replyId}`);
+  }
 
   function close() {
     onclose();
@@ -208,9 +277,11 @@
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleKey);
+    window.addEventListener('new-post', handleNewReply);
     return () => {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('new-post', handleNewReply);
     };
   });
 
@@ -358,6 +429,45 @@
     <div class="lightbox-counter" aria-live="polite">
       {index + 1} / {images.length}
     </div>
+  {/if}
+
+  {#if showSidebar}
+    <aside class="lightbox-sidebar" aria-label="Replies on this image">
+      <header class="lightbox-sidebar-header">
+        <span class="material-symbols-outlined" aria-hidden="true">chat_bubble</span>
+        <span>{currentReplies.length} {currentReplies.length === 1 ? 'reply' : 'replies'} on this image</span>
+      </header>
+      <ul class="lightbox-reply-list">
+        {#each currentReplies as reply (reply.id)}
+          <li>
+            <button
+              type="button"
+              class="lightbox-reply"
+              onclick={() => openReplyDetail(reply.id)}
+              aria-label={`Open reply by ${reply.account.display_name || reply.account.handle}`}
+            >
+              <img
+                class="lightbox-reply-avatar"
+                src={reply.account.avatar_url || '/images/default-avatar.svg'}
+                alt=""
+                loading="lazy"
+              />
+              <div class="lightbox-reply-body">
+                <div class="lightbox-reply-meta">
+                  <span class="lightbox-reply-name">{reply.account.display_name || reply.account.handle}</span>
+                  <span class="lightbox-reply-time">{relativeTime(reply.created_at)}</span>
+                </div>
+                {#if reply.content_html}
+                  <div class="lightbox-reply-text" dir="auto">{@html reply.content_html}</div>
+                {:else if reply.content}
+                  <p class="lightbox-reply-text" dir="auto">{reply.content}</p>
+                {/if}
+              </div>
+            </button>
+          </li>
+        {/each}
+      </ul>
+    </aside>
   {/if}
 </div>
 
@@ -580,5 +690,139 @@
     25%  { opacity: 1; transform: scale(1.15); }
     60%  { opacity: 1; transform: scale(1); }
     100% { opacity: 0; transform: scale(0.95); }
+  }
+
+  /* Per-image replies sidebar — only mounted when there's something
+     to show, so we don't carve out space when an image has no
+     image-pinned replies. Pinned to the trailing edge of the
+     viewport with a subtle slide-in. */
+  .lightbox-sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: min(360px, 90vw);
+    background: rgba(20, 20, 22, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-inline-start: 1px solid rgba(255, 255, 255, 0.08);
+    color: #f3f3f5;
+    display: flex;
+    flex-direction: column;
+    z-index: 3;
+    animation: lightbox-sidebar-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes lightbox-sidebar-in {
+    from { transform: translateX(100%); opacity: 0; }
+    to   { transform: translateX(0); opacity: 1; }
+  }
+
+  /* RTL: panel slides in from the inline-start edge. */
+  :global([dir="rtl"]) .lightbox-sidebar {
+    animation-name: lightbox-sidebar-in-rtl;
+  }
+
+  @keyframes lightbox-sidebar-in-rtl {
+    from { transform: translateX(-100%); opacity: 0; }
+    to   { transform: translateX(0); opacity: 1; }
+  }
+
+  .lightbox-sidebar-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 18px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-block-end: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .lightbox-sidebar-header :global(.material-symbols-outlined) {
+    font-size: 18px;
+    opacity: 0.85;
+  }
+
+  .lightbox-reply-list {
+    list-style: none;
+    margin: 0;
+    padding: 8px 0;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .lightbox-reply {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 16px;
+    background: none;
+    border: 0;
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+    font: inherit;
+    transition: background 120ms ease;
+  }
+
+  .lightbox-reply:hover,
+  .lightbox-reply:focus-visible {
+    background: rgba(255, 255, 255, 0.06);
+    outline: none;
+  }
+
+  .lightbox-reply-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 9999px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .lightbox-reply-body {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .lightbox-reply-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-block-end: 2px;
+  }
+
+  .lightbox-reply-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lightbox-reply-time {
+    font-size: 0.7rem;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .lightbox-reply-text {
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+  }
+
+  .lightbox-reply-text :global(a) {
+    color: #9bd1ff;
+  }
+
+  /* When the sidebar is open, give the stage room so the image
+     centres in the remaining space rather than under the panel. */
+  :global(.lightbox:has(.lightbox-sidebar)) .lightbox-stage,
+  :global(.lightbox:has(.lightbox-sidebar)) .lightbox-img {
+    max-width: calc(100vw - min(360px, 90vw) - 80px);
   }
 </style>
