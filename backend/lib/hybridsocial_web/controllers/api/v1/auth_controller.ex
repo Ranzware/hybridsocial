@@ -116,6 +116,20 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
         |> put_status(:unauthorized)
         |> json(%{error: "auth.invalid_credentials"})
 
+      {:error, :email_not_confirmed, identity_id} ->
+        Moderation.log(
+          identity_id,
+          "auth.login_blocked",
+          "identity",
+          identity_id,
+          %{reason: "email_not_confirmed"},
+          get_client_ip(conn)
+        )
+
+        conn
+        |> put_status(:forbidden)
+        |> json(%{error: "auth.email_not_confirmed", identity_id: identity_id})
+
       {:error, :account_suspended} ->
         Moderation.log(
           nil,
@@ -379,6 +393,11 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
         conn
         |> put_status(:unauthorized)
         |> json(%{error: "2fa.invalid_code"})
+
+      {:error, :email_not_confirmed, ident_id} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{error: "auth.email_not_confirmed", identity_id: ident_id})
 
       {:error, _reason} ->
         conn

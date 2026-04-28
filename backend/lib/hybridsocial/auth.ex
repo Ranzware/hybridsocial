@@ -48,19 +48,32 @@ defmodule Hybridsocial.Auth do
 
   @doc "Login with session metadata (IP, user agent)."
   def login_with_session(email, password, session_info) do
-    with {:ok, user} <- Accounts.authenticate_user(email, password) do
-      if user.otp_enabled do
-        {:error, :otp_required, user.identity_id}
-      else
-        issue_tokens(user, session_info)
-      end
+    case Accounts.authenticate_user(email, password) do
+      {:ok, user} ->
+        if user.otp_enabled do
+          {:error, :otp_required, user.identity_id}
+        else
+          issue_tokens(user, session_info)
+        end
+
+      # Pass these through verbatim — the controller maps each one to
+      # a distinct response shape (otp prompt, email-confirmation
+      # nudge, etc.).
+      other ->
+        other
     end
   end
 
   def login_with_otp_session(identity_id, code, session_info) do
-    with {:ok, user} <- Accounts.verify_2fa(identity_id, code) do
-      user = Repo.preload(user, :identity)
-      issue_tokens(user, session_info)
+    case Accounts.verify_2fa(identity_id, code) do
+      {:ok, user} ->
+        user = Repo.preload(user, :identity)
+        issue_tokens(user, session_info)
+
+      # Pass through verbatim — controller distinguishes invalid OTP
+      # from email-confirmation gating in its response shape.
+      other ->
+        other
     end
   end
 

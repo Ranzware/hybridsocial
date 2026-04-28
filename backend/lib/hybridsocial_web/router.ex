@@ -13,6 +13,7 @@ defmodule HybridsocialWeb.Router do
   pipeline :authenticated do
     plug HybridsocialWeb.Plugs.Auth
     plug HybridsocialWeb.Plugs.RequireAuth
+    plug HybridsocialWeb.Plugs.RequireConfirmedEmail
   end
 
   pipeline :optional_auth do
@@ -26,6 +27,7 @@ defmodule HybridsocialWeb.Router do
   pipeline :admin do
     plug HybridsocialWeb.Plugs.Auth
     plug HybridsocialWeb.Plugs.RequireAuth
+    plug HybridsocialWeb.Plugs.RequireConfirmedEmail
     plug HybridsocialWeb.Plugs.RequireAdmin
   end
 

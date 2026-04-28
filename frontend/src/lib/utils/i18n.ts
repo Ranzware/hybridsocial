@@ -57,6 +57,8 @@ const ERROR_FALLBACKS: Record<string, string> = {
   'sudo.failed': 'Could not unlock admin access. Please try again.',
   'rate_limit.exceeded': 'Too many requests. Please wait a moment.',
   'account.confirmation_required': 'Please check your email to confirm your account.',
+  'auth.email_not_confirmed':
+    'Please confirm your email address before signing in. Check your inbox for the confirmation link.',
 };
 
 export function tError(errorKey: string): string {

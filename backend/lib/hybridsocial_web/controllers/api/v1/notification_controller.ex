@@ -11,10 +11,11 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
   # GET /api/v1/notifications
   def index(conn, params) do
     identity = conn.assigns.current_identity
+    limit = clamp_limit(params["limit"])
 
     opts =
       []
-      |> maybe_put(:limit, clamp_limit(params["limit"]))
+      |> maybe_put(:limit, limit + 1)
       |> maybe_put(:max_id, params["max_id"])
       |> maybe_put(:types, parse_list(params["types[]"] || params["types"]))
       |> maybe_put(
@@ -22,12 +23,27 @@ defmodule HybridsocialWeb.Api.V1.NotificationController do
         parse_list(params["exclude_types[]"] || params["exclude_types"])
       )
 
-    notifications = Notifications.list_notifications(identity.id, opts)
-    posts = preload_target_posts(notifications)
+    # Fetch one extra row so we can tell the client whether there's a
+    # next page without making it guess from a `length >= limit`
+    # heuristic. The trailing `next_cursor` is the boundary id for the
+    # next request — when nil, the list is exhausted.
+    fetched = Notifications.list_notifications(identity.id, opts)
+    {page, next_cursor} =
+      case fetched do
+        list when length(list) > limit ->
+          truncated = Enum.take(list, limit)
+          {truncated, List.last(truncated).id}
+
+        list ->
+          {list, nil}
+      end
+
+    posts = preload_target_posts(page)
+    serialized = Enum.map(page, &serialize_notification(&1, posts))
 
     conn
     |> put_status(:ok)
-    |> json(Enum.map(notifications, &serialize_notification(&1, posts)))
+    |> json(%{data: serialized, next_cursor: next_cursor, prev_cursor: nil})
   end
 
   # GET /api/v1/notifications/:id

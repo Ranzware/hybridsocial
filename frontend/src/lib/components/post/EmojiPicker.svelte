@@ -227,14 +227,23 @@
     inset-block-end: 100%;
     inset-inline-start: 0;
     margin-block-end: var(--space-2);
-    width: 340px;
-    max-height: 380px;
+    width: min(340px, calc(100vw - 32px));
+    /* Clamp height to viewport so a tall picker can't pop off the top
+       of the screen — symptom from the field report was the search
+       bar's top edge clipped because 380px didn't fit above the
+       composer toolbar. */
+    max-height: min(380px, calc(100vh - 96px));
     background: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
+    /* Without overflow:hidden, child sections (search bar, tabs)
+       paint their own backgrounds past the picker's rounded
+       corners — looks like a stripe of "wrong colour" at the top
+       edge in the report screenshot. Clip to the rounded shell. */
+    overflow: hidden;
     z-index: var(--z-popover, 30);
     animation: picker-in 0.15s ease;
   }

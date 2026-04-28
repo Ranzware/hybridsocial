@@ -57,22 +57,27 @@
       if (typeFilter) params.types = typeFilter;
 
       const result = await getNotifications(params);
+      // Backend now returns {data, next_cursor, prev_cursor}. Older
+      // builds returned a bare array — keep that fallback so a
+      // mid-deploy stale frontend doesn't break.
       const data: Notification[] = Array.isArray(result) ? result : (result as any).data || [];
+      const nextCursor: string | null = Array.isArray(result)
+        ? (data.length > 0 ? data[data.length - 1]?.id : null)
+        : (result as any).next_cursor ?? null;
       if (reset) {
         items = data;
         setNotifications(data);
       } else {
-        // Pagination uses the last visible id as the cursor and some
-        // backend paths include that boundary row in the next page.
-        // Without dedup the {#each items as n (n.id)} block sees the
-        // same id twice and Svelte bails with each_key_duplicate.
-        // Same fix the home feed uses; preserves visible order.
+        // Defense-in-depth dedupe — the new server pagination shouldn't
+        // emit the boundary row twice, but a duplicate id in the {#each}
+        // block crashes Svelte, and we'd rather drop a row than render
+        // nothing.
         const seen = new Set(items.map((n) => n.id));
         const fresh = data.filter((n) => !seen.has(n.id));
         items = [...items, ...fresh];
       }
-      cursor = data.length > 0 ? data[data.length - 1]?.id : null;
-      hasMore = data.length >= 20;
+      cursor = nextCursor;
+      hasMore = nextCursor !== null;
     } catch {
       // Handle error silently
     } finally {

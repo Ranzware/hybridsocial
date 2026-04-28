@@ -377,18 +377,27 @@ defmodule Hybridsocial.Accounts do
         {:error, :invalid_credentials}
 
       user ->
-        if user.identity.is_suspended do
-          {:error, :account_suspended}
-        else
-          if user.identity.deleted_at do
+        cond do
+          user.identity.is_suspended ->
+            {:error, :account_suspended}
+
+          user.identity.deleted_at ->
             {:error, :account_deleted}
-          else
-            if Bcrypt.verify_pass(password, user.password_hash) do
-              {:ok, user}
-            else
-              {:error, :invalid_credentials}
-            end
-          end
+
+          not Bcrypt.verify_pass(password, user.password_hash) ->
+            {:error, :invalid_credentials}
+
+          # Email confirmation gate. The instance config defaults to
+          # `require_email_confirmation = true`, but the gate was
+          # never wired into login — unconfirmed users could collect
+          # tokens and use the platform as if confirmed. We only
+          # enforce when the config is on, so an admin can still
+          # disable confirmation site-wide.
+          is_nil(user.confirmed_at) and Hybridsocial.Config.require_email_confirmation?() ->
+            {:error, :email_not_confirmed, user.identity_id}
+
+          true ->
+            {:ok, user}
         end
     end
   end
@@ -981,7 +990,14 @@ defmodule Hybridsocial.Accounts do
       user ->
         with {:ok, secret} <- decode_otp_secret(user),
              true <- TOTP.valid_code?(secret, code) do
-          {:ok, user}
+          # Same email-confirmation gate as authenticate_user/2.
+          # Otherwise a 2FA-protected unconfirmed account could
+          # collect tokens via the OTP login route.
+          if is_nil(user.confirmed_at) and Hybridsocial.Config.require_email_confirmation?() do
+            {:error, :email_not_confirmed, user.identity_id}
+          else
+            {:ok, user}
+          end
         else
           _ -> {:error, :invalid_code}
         end
