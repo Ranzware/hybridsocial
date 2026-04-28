@@ -7,7 +7,10 @@ export function getNotifications(params?: {
   types?: string[];
 }): Promise<PaginatedResponse<Notification>> {
   const query: Record<string, string> = {};
-  if (params?.cursor) query.cursor = params.cursor;
+  // Backend reads `max_id`, not `cursor`. Sending `cursor` made the
+  // server return the same first page on every "load more" call,
+  // which then duplicated rows in the {#each ... (n.id)} block.
+  if (params?.cursor) query.max_id = params.cursor;
   if (params?.limit) query.limit = params.limit;
   if (params?.types) query.types = params.types.join(',');
   return api.get('/api/v1/notifications', query);

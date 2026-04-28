@@ -62,7 +62,14 @@
         items = data;
         setNotifications(data);
       } else {
-        items = [...items, ...data];
+        // Pagination uses the last visible id as the cursor and some
+        // backend paths include that boundary row in the next page.
+        // Without dedup the {#each items as n (n.id)} block sees the
+        // same id twice and Svelte bails with each_key_duplicate.
+        // Same fix the home feed uses; preserves visible order.
+        const seen = new Set(items.map((n) => n.id));
+        const fresh = data.filter((n) => !seen.has(n.id));
+        items = [...items, ...fresh];
       }
       cursor = data.length > 0 ? data[data.length - 1]?.id : null;
       hasMore = data.length >= 20;
