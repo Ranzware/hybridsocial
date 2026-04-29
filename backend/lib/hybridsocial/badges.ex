@@ -60,18 +60,23 @@ defmodule Hybridsocial.Badges do
   Always visible — cannot be hidden.
   """
   def group_badge(identity_id, group_id) do
-    case Repo.one(
-           from(gm in "group_members",
-             where:
-               gm.identity_id == type(^identity_id, Ecto.UUID) and
-                 gm.group_id == type(^group_id, Ecto.UUID) and
-                 gm.status == "approved",
-             select: gm.role
-           )
-         ) do
-      "owner" -> %{type: "owner", label: "Owner"}
-      "admin" -> %{type: "admin", label: "Admin"}
-      "moderator" -> %{type: "moderator", label: "Mod"}
+    row =
+      Repo.one(
+        from(gm in "group_members",
+          join: g in "groups",
+          on: g.id == gm.group_id,
+          where:
+            gm.identity_id == type(^identity_id, Ecto.UUID) and
+              gm.group_id == type(^group_id, Ecto.UUID) and
+              gm.status == "approved",
+          select: %{role: gm.role, name: g.name}
+        )
+      )
+
+    case row do
+      %{role: "owner", name: name} -> %{type: "owner", label: "Owner of #{name}"}
+      %{role: "admin", name: name} -> %{type: "admin", label: "Admin of #{name}"}
+      %{role: "moderator", name: name} -> %{type: "moderator", label: "Mod of #{name}"}
       _ -> nil
     end
   end
@@ -81,17 +86,22 @@ defmodule Hybridsocial.Badges do
   Always visible — cannot be hidden.
   """
   def page_badge(identity_id, organization_id) do
-    case Repo.one(
-           from(or_ in "organization_roles",
-             where:
-               or_.identity_id == type(^identity_id, Ecto.UUID) and
-                 or_.organization_id == type(^organization_id, Ecto.UUID),
-             select: or_.role
-           )
-         ) do
-      "admin" -> %{type: "admin", label: "Admin"}
-      "moderator" -> %{type: "moderator", label: "Mod"}
-      "editor" -> %{type: "editor", label: "Editor"}
+    row =
+      Repo.one(
+        from(or_ in "organization_roles",
+          join: org in "organizations",
+          on: org.id == or_.organization_id,
+          where:
+            or_.identity_id == type(^identity_id, Ecto.UUID) and
+              or_.organization_id == type(^organization_id, Ecto.UUID),
+          select: %{role: or_.role, name: org.name}
+        )
+      )
+
+    case row do
+      %{role: "admin", name: name} -> %{type: "admin", label: "Admin of #{name}"}
+      %{role: "moderator", name: name} -> %{type: "moderator", label: "Mod of #{name}"}
+      %{role: "editor", name: name} -> %{type: "editor", label: "Editor of #{name}"}
       _ -> nil
     end
   end
