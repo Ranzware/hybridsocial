@@ -41,11 +41,18 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
 
     account = serialize_account(post.identity, badges)
 
+    # Recurse into the quote chain up to `:quote_depth` levels (default
+    # 2 — outer → quoted → quoted-of-quoted). Posts often quote a quote
+    # that owns the actual media; without this we render an empty card.
+    # Preload `quote: :identity` so the next recursion step finds the
+    # nested quote's identity loaded and can serialize it.
+    quote_depth = Keyword.get(opts, :quote_depth, 2)
+
     quote_post =
-      case post.quote do
-        %Hybridsocial.Social.Post{} = q ->
-          q = Repo.preload(q, :identity)
-          serialize(q, opts)
+      case {post.quote, quote_depth} do
+        {%Hybridsocial.Social.Post{} = q, depth} when depth > 0 ->
+          q = Repo.preload(q, [:identity, quote: :identity])
+          serialize(q, Keyword.put(opts, :quote_depth, depth - 1))
 
         _ ->
           nil
@@ -224,11 +231,13 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
 
       account = serialize_account(post.identity, badges)
 
+      quote_depth = Keyword.get(opts, :quote_depth, 2)
+
       quote_post =
-        case post.quote do
-          %Hybridsocial.Social.Post{} = q ->
-            q = Repo.preload(q, :identity)
-            serialize(q, opts)
+        case {post.quote, quote_depth} do
+          {%Hybridsocial.Social.Post{} = q, depth} when depth > 0 ->
+            q = Repo.preload(q, [:identity, quote: :identity])
+            serialize(q, Keyword.put(opts, :quote_depth, depth - 1))
 
           _ ->
             nil

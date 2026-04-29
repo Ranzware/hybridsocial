@@ -7,9 +7,18 @@
 
   let {
     post,
+    depth = 0,
   }: {
     post: Post;
+    /** Recursion depth — outer QuoteCard passes 0; nested ones pass parent+1.
+     * Capped at 1 to limit visual depth (outer → quote → quote-of-quote). */
+    depth?: number;
   } = $props();
+
+  // Nested quotes (a post quotes a post that itself quotes a post)
+  // happen often when users reshare a quote-share. Without rendering
+  // the inner quote here, media that lives one level deeper is lost.
+  const MAX_QUOTE_DEPTH = 1;
 
   let displayName = $derived(post.account.display_name || post.account.handle);
   let handle = $derived(`@${post.account.handle}`);
@@ -84,6 +93,12 @@
           <LazyMedia media={m} isRemote={!!m.remote_url} author={post.account} />
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if post.quote && depth < MAX_QUOTE_DEPTH}
+    <div class="quote-nested" onclick={(e) => e.stopPropagation()} role="presentation">
+      <svelte:self post={post.quote} depth={depth + 1} />
     </div>
   {/if}
 
@@ -283,5 +298,13 @@
   .quote-poll-meta {
     color: var(--color-text-tertiary);
     font-size: var(--text-xs);
+  }
+
+  .quote-nested {
+    margin-block-start: var(--space-2);
+  }
+
+  .quote-nested :global(.quote-card) {
+    background: var(--color-bg-secondary);
   }
 </style>
