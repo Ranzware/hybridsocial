@@ -16,6 +16,7 @@
     { href: '/admin/user-management/approvals', label: 'Approvals' },
     { href: '/admin/user-management/appeals', label: 'Appeals' },
     { href: '/admin/user-management/registration', label: 'Registration' },
+    { href: '/admin/user-management/roles', label: 'Roles' },
     { href: '/admin/user-management/tiers', label: 'Verification Tiers' },
     { href: '/admin/user-management/badges', label: 'Custom Badges' },
     { href: '/admin/user-management/premium-reactions', label: 'Premium Reactions' },
