@@ -305,11 +305,26 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
   defp maybe_merge_server_info(result, info) do
     Map.merge(result, %{
       version: info["version"] || "unknown",
-      uptime_seconds: info["uptime"] || 0,
+      # `/varz` returns `uptime` as a human string like "3h26m21s",
+      # not seconds — the dashboard's formatUptime treats it as a
+      # number and prints NaNm. Compute seconds from the `start` and
+      # `now` ISO timestamps in the same payload.
+      uptime_seconds: nats_uptime_seconds(info),
       connections: info["connections"] || 0,
       total_messages: info["in_msgs"] || 0,
       total_bytes: info["in_bytes"] || 0
     })
+  end
+
+  defp nats_uptime_seconds(info) do
+    with start_str when is_binary(start_str) <- info["start"],
+         now_str when is_binary(now_str) <- info["now"],
+         {:ok, start_dt, _} <- DateTime.from_iso8601(start_str),
+         {:ok, now_dt, _} <- DateTime.from_iso8601(now_str) do
+      DateTime.diff(now_dt, start_dt, :second)
+    else
+      _ -> 0
+    end
   end
 
   defp maybe_merge_jetstream_info(result, nil), do: Map.put(result, :jetstream_enabled, false)
