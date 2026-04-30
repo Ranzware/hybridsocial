@@ -171,15 +171,39 @@ defmodule Hybridsocial.Federation.DeliveryStats do
     rows
     |> Enum.group_by(&domain_of/1)
     |> Enum.map(fn {domain, group} ->
-      sorted = Enum.sort_by(group, & &1.last_attempt_at, {:desc, DateTime})
+      # Some rows in older deploys ended up with naive timestamps in
+      # last_attempt_at (the column is utc_datetime_usec but the
+      # update path historically used DateTime.utc_now without
+      # explicit truncation, and Ecto can hand back NaiveDateTime in
+      # mixed states). Normalize before sorting to keep the
+      # comparator on a consistent struct, and before returning so
+      # JSON gets a UTC-suffixed value.
+      normalized =
+        Enum.map(group, fn row ->
+          %{row | last_attempt_at: naive_to_utc(row.last_attempt_at)}
+        end)
+
+      sorted =
+        Enum.sort_by(
+          normalized,
+          fn r -> r.last_attempt_at end,
+          fn a, b ->
+            cond do
+              is_nil(a) -> false
+              is_nil(b) -> true
+              true -> DateTime.compare(a, b) != :lt
+            end
+          end
+        )
+
       latest = List.first(sorted)
 
       %{
         domain: domain,
-        failures: length(group),
+        failures: length(normalized),
         last_error: latest && latest.error,
         last_attempt_at: latest && latest.last_attempt_at,
-        max_attempts: group |> Enum.map(& &1.attempts) |> Enum.max(fn -> 0 end)
+        max_attempts: normalized |> Enum.map(& &1.attempts) |> Enum.max(fn -> 0 end)
       }
     end)
     |> Enum.reject(&is_nil(&1.domain))
