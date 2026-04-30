@@ -242,7 +242,10 @@
 <style>
   .page {
     max-width: 960px;
-    margin: 0 auto;
+    /* Match the other tabs in the User-management section: content
+       aligns to the start of the layout column rather than centering
+       inside the card so all tabs visually agree. */
+    margin: 0;
     padding: var(--space-4);
   }
 

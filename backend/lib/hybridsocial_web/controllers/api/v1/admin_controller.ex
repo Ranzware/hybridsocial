@@ -659,6 +659,62 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
     key in @hidden_settings or String.starts_with?(key, "theme_")
   end
 
+  @doc """
+  Returns the resolved tier-limits map: every tier × every limit, with
+  any DB-backed override applied on top of the TierLimits defaults.
+  Lets the admin Verification Tiers page pre-fill defaults instead of
+  rendering empty fields when the operator hasn't customised them yet.
+  """
+  def tier_settings(conn, _params) do
+    with :ok <- require_permission(conn, "settings.view") do
+      defaults = Hybridsocial.Premium.TierLimits.defaults()
+      tier_keys = Map.keys(defaults)
+
+      values =
+        Enum.flat_map(tier_keys, fn tier ->
+          limits = Map.fetch!(defaults, tier)
+
+          # The display name for each tier lives at tier_<tier>_name and
+          # is operator-editable independent of the per-limit values.
+          name_value =
+            Hybridsocial.Config.get(
+              "tier_#{tier}_name",
+              Hybridsocial.Premium.TierLimits.tier_name(tier)
+            )
+
+          name_row = [%{key: "tier_#{tier}_name", value: to_string(name_value)}]
+
+          limit_rows =
+            Enum.map(limits, fn {limit_key, default_value} ->
+              key = "tier_#{tier}_#{limit_key}"
+              value = Hybridsocial.Config.get(key, default_value)
+              %{key: key, value: stringify_setting_value(value)}
+            end)
+
+          name_row ++ limit_rows
+        end)
+
+      enabled = Hybridsocial.Config.get("tiers_enabled", false)
+      payment = Hybridsocial.Config.get("tiers_payment_configured", false)
+
+      json(conn, %{
+        values:
+          values ++
+            [
+              %{key: "tiers_enabled", value: stringify_setting_value(enabled)},
+              %{key: "tiers_payment_configured", value: stringify_setting_value(payment)}
+            ]
+      })
+    else
+      {:error, perm} -> deny(conn, perm)
+    end
+  end
+
+  defp stringify_setting_value(v) when is_boolean(v), do: to_string(v)
+  defp stringify_setting_value(v) when is_integer(v) or is_float(v), do: to_string(v)
+  defp stringify_setting_value(v) when is_binary(v), do: v
+  defp stringify_setting_value(v), do: inspect(v)
+
   def list_settings(conn, _params) do
     with :ok <- require_permission(conn, "settings.view") do
       settings =

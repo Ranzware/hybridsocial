@@ -698,6 +698,10 @@ defmodule HybridsocialWeb.Router do
     get "/settings", AdminController, :list_settings
     put "/settings", AdminController, :update_settings
 
+    # Resolved tier limits (defaults filled in for any unset key) so
+    # the Verification Tiers admin page can pre-fill its inputs.
+    get "/tier_settings", AdminController, :tier_settings
+
     # Email
     get "/email", AdminController, :get_email_config
     put "/email", AdminController, :update_email_config

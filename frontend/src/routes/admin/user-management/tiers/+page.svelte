@@ -1,10 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { addToast } from '$lib/stores/toast.js';
-  import { getAdminSettings, updateAdminSettings } from '$lib/api/admin.js';
-  import type { AdminSetting } from '$lib/api/types.js';
+  import { updateAdminSettings } from '$lib/api/admin.js';
+  import { api } from '$lib/api/client.js';
 
-  let settings: AdminSetting[] = $state([]);
+  // The tier_settings endpoint always returns every tier × every limit
+  // with the TierLimits defaults filled in for any unset key, so a
+  // fresh instance still renders pre-filled values rather than empty
+  // inputs. We treat the returned list as our source of truth.
+  type TierSetting = { key: string; value: string };
+  let settings: TierSetting[] = $state([]);
   let loading = $state(true);
   let saving = $state(false);
 
@@ -63,15 +68,18 @@
   let tiersEnabled = $derived(getSettingValue('tiers_enabled') === 'true');
   let paymentConfigured = $derived(getSettingValue('tiers_payment_configured') === 'true');
 
-  onMount(async () => {
+  async function loadSettings() {
     try {
-      const all = await getAdminSettings();
-      settings = all.filter(s => s.category === 'tiers');
+      const res = await api.get<{ values: TierSetting[] }>('/api/v1/admin/tier_settings');
+      settings = res.values || [];
     } catch {
       addToast('Failed to load tier settings', 'error');
-    } finally {
-      loading = false;
     }
+  }
+
+  onMount(async () => {
+    await loadSettings();
+    loading = false;
   });
 
   async function handleSave() {
@@ -80,9 +88,7 @@
       const updates = Object.entries(changed).map(([key, value]) => ({ key, value }));
       if (updates.length > 0) {
         await updateAdminSettings(updates);
-        // Refresh
-        const all = await getAdminSettings();
-        settings = all.filter(s => s.category === 'tiers');
+        await loadSettings();
         changed = {};
         addToast('Tier settings saved', 'success');
       }
