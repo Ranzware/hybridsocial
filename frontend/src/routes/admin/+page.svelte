@@ -168,7 +168,7 @@
       {/each}
     {:else if stats}
       <StatsCard
-        label="Total Users"
+        label="Local Users"
         value={stats.total_users.toLocaleString()}
         icon="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
         href="/admin/users"
@@ -202,6 +202,27 @@
       />
     {/if}
   </div>
+
+  <section class="quick-actions-section">
+    <h2 class="section-heading">Quick actions</h2>
+    <div class="quick-actions-grid">
+      {#each [
+        { href: '/admin/users', icon: 'group', label: 'Manage users' },
+        { href: '/admin/moderation', icon: 'gavel', label: 'Review reports' },
+        { href: '/admin/federation', icon: 'hub', label: 'Federation' },
+        { href: '/admin/theme', icon: 'palette', label: 'Theme & branding' },
+        { href: '/admin/announcements', icon: 'campaign', label: 'Announcements' },
+        { href: '/admin/email', icon: 'mail', label: 'Email' },
+        { href: '/admin/tiers', icon: 'workspace_premium', label: 'Tiers' },
+        { href: '/admin/audit-log', icon: 'list', label: 'Audit log' },
+      ] as action (action.href)}
+        <a href={action.href} class="quick-action-card card card-hover">
+          <span class="material-symbols-outlined quick-action-icon" aria-hidden="true">{action.icon}</span>
+          <span class="quick-action-label">{action.label}</span>
+        </a>
+      {/each}
+    </div>
+  </section>
 
   <section class="services-section metrics-section">
     <h2 class="section-heading">Service metrics</h2>
@@ -238,27 +259,6 @@
         rows={metricRows}
         health={stats?.services?.opensearch ?? null}
       />
-    </div>
-  </section>
-
-  <section class="quick-actions-section">
-    <h2 class="section-heading">Quick actions</h2>
-    <div class="quick-actions-grid">
-      {#each [
-        { href: '/admin/users', icon: 'group', label: 'Manage users' },
-        { href: '/admin/moderation', icon: 'gavel', label: 'Review reports' },
-        { href: '/admin/federation', icon: 'hub', label: 'Federation' },
-        { href: '/admin/theme', icon: 'palette', label: 'Theme & branding' },
-        { href: '/admin/announcements', icon: 'campaign', label: 'Announcements' },
-        { href: '/admin/email', icon: 'mail', label: 'Email' },
-        { href: '/admin/tiers', icon: 'workspace_premium', label: 'Tiers' },
-        { href: '/admin/audit-log', icon: 'list', label: 'Audit log' },
-      ] as action (action.href)}
-        <a href={action.href} class="quick-action-card card card-hover">
-          <span class="material-symbols-outlined quick-action-icon" aria-hidden="true">{action.icon}</span>
-          <span class="quick-action-label">{action.label}</span>
-        </a>
-      {/each}
     </div>
   </section>
 

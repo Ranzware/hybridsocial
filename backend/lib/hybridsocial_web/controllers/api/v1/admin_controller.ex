@@ -53,10 +53,16 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
     alias Hybridsocial.Social.Post
     alias Hybridsocial.Moderation.Report
 
-    # Core stats
+    # Core stats — local users only. Federated identities live in the
+    # same table but they're counted via `known_instances` below.
+    # Mixing them into "total users" would inflate the headline number
+    # the moment a single remote account fetches a federated profile.
     total_users =
       Identity
-      |> where([i], i.type == "user" and is_nil(i.deleted_at))
+      |> where(
+        [i],
+        i.type == "user" and is_nil(i.deleted_at) and is_nil(i.ap_actor_url)
+      )
       |> Repo.aggregate(:count)
 
     total_posts =

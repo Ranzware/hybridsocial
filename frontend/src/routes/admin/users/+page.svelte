@@ -25,8 +25,17 @@
   let exactIdFilter: string | null = $state(null);
   let statusFilter = $state('all');
   let locationFilter = $state<'all' | 'local' | 'remote'>('all');
+  // Email-verification filter only applies to local accounts — remote
+  // users go through their origin instance's verification flow.
+  let emailFilter = $state<'all' | 'verified' | 'unverified'>('all');
   let sortKey = $state('created_at');
   let sortDir = $state<'asc' | 'desc'>('desc');
+
+  // Client-side pagination — the admin endpoint returns the full set
+  // and we slice locally so search/filter/sort can stay snappy without
+  // round-tripping for every keystroke.
+  const PAGE_SIZE = 50;
+  let currentPage = $state(1);
 
   // Warn modal
   let warnModalOpen = $state(false);
@@ -123,9 +132,25 @@
         locationFilter === 'all' ||
         (locationFilter === 'local' && (u as any).is_local !== false) ||
         (locationFilter === 'remote' && (u as any).is_local === false);
-      return matchesSearch && matchesStatus && matchesLocation;
+      const isLocal = (u as any).is_local !== false;
+      const matchesEmail =
+        emailFilter === 'all' ||
+        // Only apply the email filter to local accounts. Remote rows
+        // would otherwise match "unverified" en masse since we don't
+        // own their verification state.
+        !isLocal ||
+        (emailFilter === 'verified' && (u as any).email_confirmed === true) ||
+        (emailFilter === 'unverified' && (u as any).email_confirmed === false);
+      return matchesSearch && matchesStatus && matchesLocation && matchesEmail;
     })
   );
+
+  // Reset to page 1 whenever a filter changes — pagination keyed off a
+  // larger result set is meaningless once the result set shrinks.
+  $effect(() => {
+    void search; void statusFilter; void locationFilter; void emailFilter; void exactIdFilter;
+    currentPage = 1;
+  });
 
   let sortedUsers = $derived(
     [...filteredUsers].sort((a, b) => {
@@ -175,6 +200,21 @@
       is_subaccount: !!(u.parent_identity_id && groupedUsers.some((p) => p.id === u.parent_identity_id)),
     } as Record<string, unknown>))
   );
+
+  let totalPages = $derived(Math.max(1, Math.ceil(tableRows.length / PAGE_SIZE)));
+  let pagedRows = $derived(
+    tableRows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+  );
+
+  // Paint local rows whose email isn't confirmed in a warning tint so
+  // an admin scanning the table can spot stalled signups at a glance.
+  // Remote rows are excluded — we don't own their email confirmation
+  // state and would otherwise tint half the federated table.
+  function rowClassFor(row: Record<string, unknown>): string {
+    const isLocal = row['is_local'] !== false;
+    if (isLocal && row['email_confirmed'] === false) return 'row-email-unverified';
+    return '';
+  }
 
   onMount(async () => {
     // Deep-link params:
@@ -635,14 +675,20 @@
       <option value="suspended">Suspended</option>
       <option value="pending">Pending</option>
     </select>
+    <select class="input status-select" bind:value={emailFilter} aria-label="Filter by email verification">
+      <option value="all">All emails</option>
+      <option value="verified">Verified email</option>
+      <option value="unverified">Unverified email</option>
+    </select>
   </div>
 
   <DataTable
     {columns}
-    rows={tableRows}
+    rows={pagedRows}
     bind:sortKey
     bind:sortDir
     {loading}
+    rowClass={rowClassFor}
     emptyMessage="No users found"
   >
     {#snippet rowContent(row)}
@@ -676,7 +722,14 @@
           </div>
         </div>
       </td>
-      <td>{row['email'] || ''}</td>
+      <td>
+        <div class="email-cell">
+          <span>{row['email'] || ''}</span>
+          {#if row['is_local'] !== false && row['email_confirmed'] === false}
+            <span class="email-unverified-pill" title="Email not confirmed">unverified</span>
+          {/if}
+        </div>
+      </td>
       <td>{formatDate(row['created_at'] as string)}</td>
       <td>
         <span class="status-badge {statusClass(row['is_suspended'] ? 'suspended' : 'active')}">
@@ -819,6 +872,31 @@
       </td>
     {/snippet}
   </DataTable>
+
+  {#if !loading && tableRows.length > PAGE_SIZE}
+    <nav class="pagination" aria-label="User list pagination">
+      <button
+        type="button"
+        class="page-btn"
+        onclick={() => (currentPage = Math.max(1, currentPage - 1))}
+        disabled={currentPage === 1}
+      >
+        Previous
+      </button>
+      <span class="page-info">
+        Page {currentPage} of {totalPages}
+        <span class="page-info-count">({tableRows.length.toLocaleString()} users)</span>
+      </span>
+      <button
+        type="button"
+        class="page-btn"
+        onclick={() => (currentPage = Math.min(totalPages, currentPage + 1))}
+        disabled={currentPage >= totalPages}
+      >
+        Next
+      </button>
+    </nav>
+  {/if}
 </div>
 
 <!-- Warn Modal -->
@@ -1484,6 +1562,80 @@
     border-radius: 4px;
     width: fit-content;
     margin-block-start: 2px;
+  }
+
+  .email-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .email-unverified-pill {
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #92400e;
+    background: rgba(234, 179, 8, 0.18);
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+
+  /* Highlight local accounts that haven't confirmed their email yet —
+     applied to the <tr> via DataTable's rowClass hook so it overrides
+     both the zebra striping and the row hover background. */
+  :global(.data-table tbody tr.row-email-unverified) {
+    background: rgba(234, 179, 8, 0.10);
+  }
+
+  :global(.data-table tbody tr.row-email-unverified:hover) {
+    background: rgba(234, 179, 8, 0.18);
+  }
+
+  :global(.data-table tbody tr.row-email-unverified:nth-child(even)) {
+    background: rgba(234, 179, 8, 0.13);
+  }
+
+  /* Pagination footer below the user table. */
+  .pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    margin-block-start: var(--space-4);
+    padding: var(--space-2);
+  }
+
+  .page-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .page-btn:hover:not(:disabled) {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+  }
+
+  .page-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .page-info {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .page-info-count {
+    color: var(--color-text-tertiary);
+    margin-inline-start: 6px;
   }
 
   /* Manage Roles modal */

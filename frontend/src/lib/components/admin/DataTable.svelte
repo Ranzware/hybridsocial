@@ -16,7 +16,8 @@
     onrowclick,
     loading = false,
     emptyMessage = 'No data found',
-    rowContent
+    rowContent,
+    rowClass
   }: {
     columns: Column[];
     rows: Record<string, unknown>[];
@@ -26,6 +27,8 @@
     loading?: boolean;
     emptyMessage?: string;
     rowContent: Snippet<[Record<string, unknown>]>;
+    /** Optional per-row class hook (e.g. tint an unverified-email row). */
+    rowClass?: (row: Record<string, unknown>) => string | undefined;
   } = $props();
 
   function handleSort(col: Column) {
@@ -51,6 +54,7 @@
 </script>
 
 <div class="table-wrapper">
+  <div class="table-scroll">
   <table class="data-table">
     <thead>
       <tr>
@@ -100,6 +104,7 @@
         {#each rows as row (row['id'] ?? rows.indexOf(row))}
           <tr
             class:clickable={!!onrowclick}
+            class={rowClass?.(row) ?? ''}
             onclick={() => handleRowClick(row)}
             onkeydown={(e) => handleRowKeydown(e, row)}
             role={onrowclick ? 'button' : undefined}
@@ -111,23 +116,41 @@
       {/if}
     </tbody>
   </table>
+  </div>
 </div>
 
 <style>
   .table-wrapper {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
+    /* Clip rounded corners + keep any wide row content inside the
+       frame. The inner .table-scroll handles the actual horizontal
+       overflow when the table is wider than the viewport. */
+    overflow: hidden;
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+    /* Smooth wheel scroll on macOS without throwing the whole page
+       sideways when the user lands on a card-wide trackpad gesture. */
+    overscroll-behavior-x: contain;
   }
 
   .data-table {
     width: 100%;
     border-collapse: collapse;
     font-size: var(--text-sm);
+    /* Stops the table from growing past the wrapper when a single
+       cell (e.g. a long email) wraps unkindly. */
+    table-layout: auto;
   }
 
   .data-table th {
     text-align: start;
-    padding: var(--space-3) var(--space-4);
+    /* Bumped from var(--space-4) — the previous padding had cell
+       content brushing the wrapper border, especially on the action
+       buttons in the rightmost column. */
+    padding: var(--space-3) var(--space-5);
     background: var(--color-surface);
     color: var(--color-text-secondary);
     font-weight: 600;
@@ -139,7 +162,7 @@
   }
 
   .data-table td {
-    padding: var(--space-4) var(--space-4);
+    padding: var(--space-4) var(--space-5);
     border-block-end: 1px solid var(--color-border);
     color: var(--color-text);
     vertical-align: middle;
