@@ -38,9 +38,27 @@ defmodule Hybridsocial.Federation.DeadLetters do
     )
     |> Repo.all()
     |> Enum.map(fn row ->
-      Map.put(row, :domain, domain_of(row.target_inbox))
+      # Querying the raw table source (`d in "federation_deliveries"`)
+      # bypasses the schema's :binary_id Ecto type, so id/actor_id come
+      # back as 16-byte binaries that Jason can't encode. Cast to the
+      # standard UUID string form before serialization.
+      row
+      |> Map.put(:id, uuid_to_string(row.id))
+      |> Map.put(:actor_id, uuid_to_string(row.actor_id))
+      |> Map.put(:domain, domain_of(row.target_inbox))
     end)
   end
+
+  defp uuid_to_string(nil), do: nil
+
+  defp uuid_to_string(<<_::128>> = bin) do
+    case Ecto.UUID.load(bin) do
+      {:ok, str} -> str
+      _ -> nil
+    end
+  end
+
+  defp uuid_to_string(s) when is_binary(s), do: s
 
   @doc "Total number of failed deliveries (for pagination metadata)."
   def count do
@@ -58,7 +76,8 @@ defmodule Hybridsocial.Federation.DeadLetters do
   `{:error, reason}`.
   """
   def retry(delivery_id) do
-    with %Delivery{} = delivery <- Repo.get(Delivery, delivery_id),
+    with {:ok, _} <- Ecto.UUID.cast(delivery_id),
+         %Delivery{} = delivery <- Repo.get(Delivery, delivery_id),
          {:ok, body} <- ensure_body(delivery),
          {:ok, identity} <- ensure_actor(delivery.actor_id) do
       # Bump the row to retrying so concurrent admin clicks don't
@@ -101,6 +120,7 @@ defmodule Hybridsocial.Federation.DeadLetters do
       end
     else
       nil -> {:error, :not_found}
+      :error -> {:error, :not_found}
       {:error, _} = err -> err
     end
   end
@@ -120,7 +140,9 @@ defmodule Hybridsocial.Federation.DeadLetters do
       |> Repo.all()
 
     Enum.reduce(ids, {0, 0}, fn id, {ok, fail} ->
-      case retry(id) do
+      # `ids` came from a binary_id select on the raw source, so each
+      # element is a 16-byte binary. retry/1 expects a UUID string.
+      case retry(uuid_to_string(id)) do
         {:ok, :delivered} -> {ok + 1, fail}
         _ -> {ok, fail + 1}
       end
