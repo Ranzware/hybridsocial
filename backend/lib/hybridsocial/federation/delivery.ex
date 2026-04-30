@@ -8,6 +8,9 @@ defmodule Hybridsocial.Federation.Delivery do
 
   schema "federation_deliveries" do
     field :activity_id, :string
+    # Captured at insert time so the admin dashboard can chart
+    # throughput by type without re-fetching the activity body.
+    field :activity_type, :string
     field :actor_id, :binary_id
     field :target_inbox, :string
     field :status, :string, default: "pending"
@@ -22,6 +25,7 @@ defmodule Hybridsocial.Federation.Delivery do
     delivery
     |> cast(attrs, [
       :activity_id,
+      :activity_type,
       :actor_id,
       :target_inbox,
       :status,

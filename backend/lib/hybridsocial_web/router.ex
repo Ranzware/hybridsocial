@@ -764,6 +764,9 @@ defmodule HybridsocialWeb.Router do
 
     # Job queue
     get "/queue_stats", AdminController, :queue_stats
+    # Federation delivery dashboard — queue snapshot + throughput +
+    # top failing peers. Powers the Delivery Queue tab.
+    get "/federation/delivery", AdminController, :federation_delivery
 
     # Promotions management
     get "/promotions", AdminController, :list_promotions

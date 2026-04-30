@@ -3711,6 +3711,24 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
     end
   end
 
+  @doc """
+  Federation delivery snapshot for the admin dashboard's Delivery Queue
+  tab. Bundles three queries so the page renders in one round-trip:
+  the queue numbers, last-hour throughput by activity type, and the
+  top failing destination domains.
+  """
+  def federation_delivery(conn, _params) do
+    with :ok <- require_permission(conn, "federation.view") do
+      json(conn, %{
+        queue: Hybridsocial.Federation.DeliveryStats.queue(),
+        throughput: Hybridsocial.Federation.DeliveryStats.throughput(),
+        top_failing: Hybridsocial.Federation.DeliveryStats.top_failing_destinations(10)
+      })
+    else
+      {:error, perm} -> deny(conn, perm)
+    end
+  end
+
   # --- Ads Management ---
 
   def list_ads(conn, params) do

@@ -7,9 +7,10 @@
   import {
     getKnownInstances,
     getFederationPolicies, createFederationPolicy, deleteFederationPolicy,
-    getDeliveryQueueStats, retryDeliveryQueue,
     purgeInstancePreview, purgeInstanceContent
   } from '$lib/api/admin.js';
+  import { api } from '$lib/api/client.js';
+  import Sparkline from '$lib/components/admin/Sparkline.svelte';
   import RelaysPanel from '$lib/components/admin/RelaysPanel.svelte';
   import type { KnownInstance, FederationPolicy, DeliveryQueueStats, InstancePurgePreview } from '$lib/api/types.js';
 
@@ -48,9 +49,33 @@
   let newPolicyReason = $state('');
 
   // Delivery Queue
-  let deliveryStats: any | null = $state(null);
+  // The Delivery Queue tab now reads from /admin/federation/delivery
+  // which bundles three queries: queue snapshot, last-hour throughput
+  // by activity type, and the top failing destination domains. Old
+  // BEAM-stats blob (/admin/queue_stats) was misnamed — it was VM
+  // metrics, not delivery metrics — so we drop it from this tab.
+  type FederationDelivery = {
+    queue: {
+      pending: number;
+      retrying: number;
+      failed_24h: number;
+      delivered_24h: number;
+      oldest_pending_age_seconds: number;
+    };
+    throughput: {
+      buckets: { t: string; total: number; by_type: Record<string, number> }[];
+      totals_by_type: Record<string, number>;
+    };
+    top_failing: {
+      domain: string;
+      failures: number;
+      last_error: string | null;
+      last_attempt_at: string | null;
+      max_attempts: number;
+    }[];
+  };
+  let deliveryStats: FederationDelivery | null = $state(null);
   let deliveryLoading = $state(false);
-  let retrying = $state(false);
 
   // Purge
   let purgeModalOpen = $state(false);
@@ -91,7 +116,7 @@
   async function loadDelivery() {
     deliveryLoading = true;
     try {
-      deliveryStats = await getDeliveryQueueStats();
+      deliveryStats = await api.get<FederationDelivery>('/api/v1/admin/federation/delivery');
     } catch {
       addToast('Failed to load delivery stats', 'error');
     } finally {
@@ -99,6 +124,51 @@
       deliveryLoaded = true;
     }
   }
+
+  function formatAge(seconds: number): string {
+    if (!seconds || seconds <= 0) return '—';
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+    return `${Math.floor(seconds / 86_400)}d ${Math.floor((seconds % 86_400) / 3600)}h`;
+  }
+
+  function formatRelative(iso: string | null): string {
+    if (!iso) return '—';
+    const diff = Date.now() - new Date(iso).getTime();
+    const sec = Math.max(0, Math.floor(diff / 1000));
+    return formatAge(sec) + ' ago';
+  }
+
+  // Throughput series for the sparkline. The backend returns one row
+  // per minute that had any deliveries, so we densify to 60 buckets
+  // (one per minute) — missing minutes count as zero so the chart
+  // doesn't telescope across gaps.
+  let throughputSeries = $derived.by(() => {
+    if (!deliveryStats?.throughput?.buckets?.length) return [] as { t: string; v: number }[];
+    const buckets = deliveryStats.throughput.buckets;
+    const byMinute = new Map<number, number>();
+    for (const b of buckets) {
+      byMinute.set(new Date(b.t).getTime(), b.total);
+    }
+    const now = Date.now();
+    const start = Math.floor((now - 60 * 60_000) / 60_000) * 60_000;
+    const out: { t: string; v: number }[] = [];
+    for (let i = 0; i <= 60; i++) {
+      const t = start + i * 60_000;
+      out.push({ t: new Date(t).toISOString(), v: byMinute.get(t) ?? 0 });
+    }
+    return out;
+  });
+
+  // Activity-type chips ordered by count desc, six most common types.
+  let typeBreakdown = $derived.by(() => {
+    if (!deliveryStats?.throughput?.totals_by_type) return [] as { type: string; count: number }[];
+    return Object.entries(deliveryStats.throughput.totals_by_type)
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  });
 
   let policiesLoaded = $state(false);
   let deliveryLoaded = $state(false);
@@ -138,18 +208,6 @@
     }
   }
 
-  async function handleRetryDelivery() {
-    retrying = true;
-    try {
-      await retryDeliveryQueue();
-      addToast('Delivery queue retry started', 'success');
-      await loadDelivery();
-    } catch {
-      addToast('Failed to retry delivery queue', 'error');
-    } finally {
-      retrying = false;
-    }
-  }
 
   async function openPurgeModal(domain: string) {
     purgeDomain = domain;
@@ -320,50 +378,92 @@
       {#if deliveryLoading}
         <div class="delivery-loading">
           <div class="skeleton" style="height: 80px"></div>
+          <div class="skeleton" style="height: 120px; margin-top: 16px"></div>
         </div>
       {:else if deliveryStats}
-        <div class="delivery-grid">
-          <div class="delivery-stat card">
-            <div class="delivery-label">NATS</div>
-            <div class="delivery-value" class:delivery-ok={deliveryStats.nats?.connected} class:delivery-failed={!deliveryStats.nats?.connected}>
-              {deliveryStats.nats?.connected ? 'Connected' : 'Disconnected'}
+        <!-- Queue snapshot: the four numbers an admin checks first. -->
+        <section class="delivery-section">
+          <h3 class="delivery-section-title">Queue</h3>
+          <div class="delivery-grid">
+            <div class="delivery-stat card">
+              <div class="delivery-label">Pending</div>
+              <div class="delivery-value">{deliveryStats.queue.pending.toLocaleString()}</div>
+              <div class="delivery-sub">never attempted</div>
+            </div>
+            <div class="delivery-stat card">
+              <div class="delivery-label">Retrying</div>
+              <div class="delivery-value" class:delivery-warn={deliveryStats.queue.retrying > 0}>
+                {deliveryStats.queue.retrying.toLocaleString()}
+              </div>
+              <div class="delivery-sub">failed at least once</div>
+            </div>
+            <div class="delivery-stat card">
+              <div class="delivery-label">Failed (24h)</div>
+              <div class="delivery-value" class:delivery-failed={deliveryStats.queue.failed_24h > 0}>
+                {deliveryStats.queue.failed_24h.toLocaleString()}
+              </div>
+              <div class="delivery-sub">exhausted retries</div>
+            </div>
+            <div class="delivery-stat card">
+              <div class="delivery-label">Oldest pending</div>
+              <div class="delivery-value">{formatAge(deliveryStats.queue.oldest_pending_age_seconds)}</div>
+              <div class="delivery-sub">backlog age</div>
             </div>
           </div>
-          <div class="delivery-stat card">
-            <div class="delivery-label">Active Tasks</div>
-            <div class="delivery-value">{deliveryStats.tasks?.active ?? 0}</div>
-          </div>
-          <div class="delivery-stat card">
-            <div class="delivery-label">Processes</div>
-            <div class="delivery-value">{deliveryStats.system?.process_count?.toLocaleString() ?? '—'}</div>
-          </div>
-          <div class="delivery-stat card">
-            <div class="delivery-label">Memory</div>
-            <div class="delivery-value">{deliveryStats.system?.memory_total_mb ?? '—'} MB</div>
-          </div>
-          <div class="delivery-stat card">
-            <div class="delivery-label">Uptime</div>
-            <div class="delivery-value">{deliveryStats.system?.uptime_seconds ? Math.floor(deliveryStats.system.uptime_seconds / 3600) + 'h ' + Math.floor((deliveryStats.system.uptime_seconds % 3600) / 60) + 'm' : '—'}</div>
-          </div>
-          <div class="delivery-stat card">
-            <div class="delivery-label">Schedulers</div>
-            <div class="delivery-value">{deliveryStats.system?.scheduler_count ?? '—'}</div>
-          </div>
-        </div>
+        </section>
 
-        {#if deliveryStats.workers?.length > 0}
-          <h3 style="margin: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); font-weight: 600;">Workers</h3>
-          <div class="delivery-grid">
-            {#each deliveryStats.workers as worker}
-              <div class="delivery-stat card">
-                <div class="delivery-label">{worker.name}</div>
-                <div class="delivery-value" class:delivery-ok={worker.alive} class:delivery-failed={!worker.alive}>
-                  {worker.alive ? 'Running' : 'Stopped'}
-                </div>
-              </div>
-            {/each}
+        <!-- Last-hour throughput + per-type breakdown. -->
+        <section class="delivery-section">
+          <div class="delivery-section-head">
+            <h3 class="delivery-section-title">Throughput · last hour</h3>
+            <span class="delivery-section-meta">
+              {deliveryStats.queue.delivered_24h.toLocaleString()} delivered in last 24h
+            </span>
           </div>
-        {/if}
+          <div class="delivery-throughput card">
+            <div class="throughput-chart">
+              <Sparkline points={throughputSeries} width={640} height={64} />
+            </div>
+            {#if typeBreakdown.length > 0}
+              <ul class="throughput-types">
+                {#each typeBreakdown as t (t.type)}
+                  <li class="throughput-type">
+                    <span class="throughput-type-label">{t.type}</span>
+                    <span class="throughput-type-count">{t.count.toLocaleString()}</span>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="empty-text">No deliveries in the last hour.</p>
+            {/if}
+          </div>
+        </section>
+
+        <!-- Top failing destinations: where federation is currently broken. -->
+        <section class="delivery-section">
+          <h3 class="delivery-section-title">Top failing destinations · last 24h</h3>
+          {#if deliveryStats.top_failing.length > 0}
+            <div class="top-failing">
+              {#each deliveryStats.top_failing as row (row.domain)}
+                <div class="failing-row card">
+                  <div class="failing-head">
+                    <span class="failing-domain">{row.domain}</span>
+                    <span class="failing-count">{row.failures.toLocaleString()} failures</span>
+                  </div>
+                  {#if row.last_error}
+                    <div class="failing-error" title={row.last_error}>{row.last_error}</div>
+                  {/if}
+                  <div class="failing-meta">
+                    <span>Max attempts: {row.max_attempts}</span>
+                    <span>Last: {formatRelative(row.last_attempt_at)}</span>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <p class="empty-text">No failing destinations in the last 24h.</p>
+          {/if}
+        </section>
 
         <div class="delivery-actions">
           <button class="btn btn-outline" type="button" onclick={loadDelivery}>
@@ -550,40 +650,160 @@
     color: var(--color-text-secondary);
   }
 
-  .delivery-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--space-4);
-    margin-block-end: var(--space-4);
+  .delivery-section {
+    margin-block-end: var(--space-5);
   }
 
-  .delivery-stat {
-    text-align: center;
-    padding: var(--space-6);
-  }
-
-  .delivery-label {
-    font-size: var(--text-sm);
-    color: var(--color-text-secondary);
+  .delivery-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
     margin-block-end: var(--space-2);
   }
 
-  .delivery-value {
-    font-size: var(--text-3xl);
+  .delivery-section-title {
+    font-size: var(--text-sm);
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-secondary);
+    margin: 0 0 var(--space-2);
   }
 
-  .delivery-ok {
-    color: #16a34a;
+  .delivery-section-meta {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
   }
 
-  .delivery-failed {
+  .delivery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+  }
+
+  .delivery-stat {
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .delivery-label {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .delivery-value {
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+
+  .delivery-sub {
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
+  }
+
+  .delivery-ok { color: #16a34a; }
+  .delivery-warn { color: #b45309; }
+  .delivery-failed { color: var(--color-danger); }
+
+  .delivery-throughput {
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .throughput-chart {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .throughput-types {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+  }
+
+  .throughput-type {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    background: var(--color-surface);
+    font-size: var(--text-xs);
+  }
+
+  .throughput-type-label {
+    font-weight: 600;
+    color: var(--color-text);
+  }
+
+  .throughput-type-count {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .top-failing {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .failing-row {
+    padding: var(--space-3) var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .failing-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .failing-domain {
+    font-weight: 700;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+  }
+
+  .failing-count {
+    font-size: var(--text-xs);
     color: var(--color-danger);
+    font-weight: 600;
+  }
+
+  .failing-error {
+    font-size: var(--text-xs);
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .failing-meta {
+    display: flex;
+    gap: var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--color-text-tertiary);
   }
 
   .delivery-actions {
     display: flex;
     gap: var(--space-3);
+    margin-block-start: var(--space-3);
   }
 
   .delivery-loading {

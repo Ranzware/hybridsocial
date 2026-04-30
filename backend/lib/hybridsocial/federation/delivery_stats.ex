@@ -1,0 +1,194 @@
+defmodule Hybridsocial.Federation.DeliveryStats do
+  @moduledoc """
+  Read-only metrics over the `federation_deliveries` table for the
+  admin Delivery Queue tab. Three buckets:
+
+  1. `queue/0` — current snapshot: pending / retrying / failed-24h /
+     oldest pending age. The four numbers an admin checks first.
+  2. `throughput/0` — per-minute series for the last hour, broken down
+     by activity type. Counts deliveries that *resolved* (delivered or
+     failed) so the chart shows real outbound rate, not new-row rate.
+  3. `top_failing_destinations/1` — domains with the most failed or
+     retrying deliveries in the last 24h, with their last error
+     message. Most useful single diagnostic when federation breaks.
+  """
+
+  import Ecto.Query
+  alias Hybridsocial.Repo
+
+  @doc """
+  Returns the current queue snapshot.
+  """
+  def queue do
+    now = DateTime.utc_now()
+    cutoff_24h = DateTime.add(now, -24 * 3600, :second)
+
+    pending_count = count_by_status("pending")
+    retrying_count = count_by_status("retrying")
+
+    failed_24h_count =
+      Repo.one(
+        from d in "federation_deliveries",
+          where: d.status == "failed" and d.last_attempt_at >= ^cutoff_24h,
+          select: count(d.id)
+      ) || 0
+
+    delivered_24h_count =
+      Repo.one(
+        from d in "federation_deliveries",
+          where: d.status == "delivered" and d.last_attempt_at >= ^cutoff_24h,
+          select: count(d.id)
+      ) || 0
+
+    oldest_pending =
+      Repo.one(
+        from d in "federation_deliveries",
+          where: d.status in ["pending", "retrying"],
+          select: min(d.inserted_at)
+      )
+
+    oldest_age_seconds =
+      case oldest_pending do
+        nil -> 0
+        ts -> DateTime.diff(now, ts, :second)
+      end
+
+    %{
+      pending: pending_count,
+      retrying: retrying_count,
+      failed_24h: failed_24h_count,
+      delivered_24h: delivered_24h_count,
+      oldest_pending_age_seconds: oldest_age_seconds
+    }
+  end
+
+  defp count_by_status(status) do
+    Repo.one(
+      from d in "federation_deliveries",
+        where: d.status == ^status,
+        select: count(d.id)
+    ) || 0
+  end
+
+  @doc """
+  Per-minute throughput for the last hour, broken down by activity type.
+
+  Returns:
+      %{
+        buckets: [%{t: ~U[..], total: 12, by_type: %{"Create" => 8, ...}}, ...],
+        totals_by_type: %{"Create" => 240, "Like" => 60, ...}
+      }
+  """
+  def throughput do
+    now = DateTime.utc_now()
+    cutoff = DateTime.add(now, -3600, :second)
+
+    rows =
+      Repo.all(
+        from d in "federation_deliveries",
+          where:
+            d.status in ["delivered", "failed"] and
+              d.last_attempt_at >= ^cutoff,
+          group_by:
+            fragment(
+              "date_bin('1 minute'::interval, ?, TIMESTAMP '2001-01-01')",
+              d.last_attempt_at
+            ),
+          group_by: d.activity_type,
+          order_by:
+            fragment(
+              "date_bin('1 minute'::interval, ?, TIMESTAMP '2001-01-01')",
+              d.last_attempt_at
+            ),
+          select: %{
+            t:
+              fragment(
+                "date_bin('1 minute'::interval, ?, TIMESTAMP '2001-01-01')",
+                d.last_attempt_at
+              ),
+            type: d.activity_type,
+            count: count(d.id)
+          }
+      )
+
+    # Reshape to {bucket_ts => %{type => count}}.
+    grouped =
+      Enum.reduce(rows, %{}, fn %{t: t, type: type, count: count}, acc ->
+        type_label = type || "Other"
+
+        Map.update(
+          acc,
+          t,
+          %{type_label => count},
+          fn existing -> Map.update(existing, type_label, count, &(&1 + count)) end
+        )
+      end)
+
+    buckets =
+      grouped
+      |> Enum.map(fn {t, by_type} ->
+        %{t: t, total: by_type |> Map.values() |> Enum.sum(), by_type: by_type}
+      end)
+      |> Enum.sort_by(& &1.t, DateTime)
+
+    totals_by_type =
+      Enum.reduce(buckets, %{}, fn %{by_type: by_type}, acc ->
+        Map.merge(acc, by_type, fn _k, a, b -> a + b end)
+      end)
+
+    %{buckets: buckets, totals_by_type: totals_by_type}
+  end
+
+  @doc """
+  Top N domains with the most failed/retrying deliveries in the last
+  24h, with the most recent error message and last attempt timestamp.
+  """
+  def top_failing_destinations(limit \\ 10) do
+    now = DateTime.utc_now()
+    cutoff = DateTime.add(now, -24 * 3600, :second)
+
+    # Per-domain failure aggregation. We pull the raw rows and group in
+    # Elixir because Postgres can't easily extract host from a text URL
+    # and aggregate "latest error per domain" in a single SQL pass.
+    rows =
+      Repo.all(
+        from d in "federation_deliveries",
+          where:
+            d.status in ["failed", "retrying"] and
+              d.last_attempt_at >= ^cutoff,
+          select: %{
+            target_inbox: d.target_inbox,
+            error: d.error,
+            last_attempt_at: d.last_attempt_at,
+            attempts: d.attempts
+          }
+      )
+
+    rows
+    |> Enum.group_by(&domain_of/1)
+    |> Enum.map(fn {domain, group} ->
+      sorted = Enum.sort_by(group, & &1.last_attempt_at, {:desc, DateTime})
+      latest = List.first(sorted)
+
+      %{
+        domain: domain,
+        failures: length(group),
+        last_error: latest && latest.error,
+        last_attempt_at: latest && latest.last_attempt_at,
+        max_attempts: group |> Enum.map(& &1.attempts) |> Enum.max(fn -> 0 end)
+      }
+    end)
+    |> Enum.reject(&is_nil(&1.domain))
+    |> Enum.sort_by(& &1.failures, :desc)
+    |> Enum.take(limit)
+  end
+
+  defp domain_of(%{target_inbox: inbox}) when is_binary(inbox) do
+    case URI.parse(inbox) do
+      %URI{host: host} when is_binary(host) -> host
+      _ -> nil
+    end
+  end
+
+  defp domain_of(_), do: nil
+end
