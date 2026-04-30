@@ -1435,7 +1435,7 @@
               : 'Add a poll'}
           disabled={uploadedMedia.length > 0}
         >
-          <span class="material-symbols-outlined tool-icon">ballot</span>
+          <span class="tool-icon-svg tool-icon-poll" aria-hidden="true"></span>
         </button>
 
         <!-- Schedule toggle -->
@@ -1449,7 +1449,7 @@
             aria-pressed={showSchedule}
             title={showSchedule ? 'Cancel scheduling — post immediately' : 'Schedule for later'}
           >
-            <span class="material-symbols-outlined tool-icon">schedule_send</span>
+            <span class="tool-icon-svg tool-icon-schedule" aria-hidden="true"></span>
           </button>
         {/if}
 
@@ -2443,6 +2443,32 @@
 
   .tool-icon {
     font-size: 22px;
+  }
+
+  /* Custom SVG icons rendered via CSS mask so they pick up the
+     button's `color` (matching the Material Symbols glyphs in the
+     same toolbar). The SVG is monochrome — only its alpha matters. */
+  .tool-icon-svg {
+    display: inline-block;
+    width: 22px;
+    height: 22px;
+    background-color: currentColor;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-size: contain;
+  }
+
+  .tool-icon-poll {
+    -webkit-mask-image: url('/icons/poll.svg');
+    mask-image: url('/icons/poll.svg');
+  }
+
+  .tool-icon-schedule {
+    -webkit-mask-image: url('/icons/schedule.svg');
+    mask-image: url('/icons/schedule.svg');
   }
 
   .tool-btn-text {
