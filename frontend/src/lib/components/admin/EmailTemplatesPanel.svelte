@@ -10,7 +10,6 @@
   let loading = $state(true);
   let selectedKey = $state<string | null>(null);
 
-  // Draft state for the currently open template.
   let draftSubject = $state('');
   let draftHtml = $state('');
   let draftEnabled = $state(true);
@@ -23,8 +22,6 @@
     templates.find((t) => t.key === selectedKey) || null
   );
 
-  // "Dirty" means the draft diverges from what's currently saved on
-  // the server — Save button is only enabled when it does.
   let dirty = $derived(
     selectedTemplate !== null &&
     (
@@ -53,8 +50,6 @@
     draftHtml = t.html_body;
     draftEnabled = t.enabled;
     preview = null;
-    // Auto-preview the current saved version so admins see something
-    // immediately without clicking a button.
     runPreview(true);
   }
 
@@ -84,7 +79,6 @@
       });
       addToast('Template saved', 'success');
       templates = await getEmailTemplates();
-      // Re-select to refresh the saved values in the draft state
       selectTemplate(selectedTemplate.key);
     } catch (err: unknown) {
       const e = err as { body?: { error?: string; details?: Record<string, string[]> } };
@@ -116,14 +110,12 @@
   }
 
   function insertVariable(varName: string) {
-    // Insert at the current cursor position in the HTML textarea.
     const ta = document.getElementById('html-body') as HTMLTextAreaElement | null;
     if (!ta) return;
     const start = ta.selectionStart;
     const end = ta.selectionEnd;
     const token = `{{${varName}}}`;
     draftHtml = draftHtml.slice(0, start) + token + draftHtml.slice(end);
-    // Restore cursor just after the inserted token
     queueMicrotask(() => {
       ta.focus();
       ta.selectionStart = ta.selectionEnd = start + token.length;
@@ -131,21 +123,13 @@
   }
 </script>
 
-<svelte:head>
-  <title>Email Templates - Admin</title>
-</svelte:head>
-
-<div class="templates-page">
-  <div class="page-header">
-    <h1 class="page-title">Email Templates</h1>
-    <p class="page-sub">Customise transactional emails sent by the instance. Unchecked <em>enabled</em> or a missing template falls back to the built-in default.</p>
-  </div>
+<div class="templates-panel">
+  <p class="panel-sub">Customise transactional emails sent by the instance. Unchecked <em>enabled</em> or a missing template falls back to the built-in default.</p>
 
   {#if loading}
     <div class="skeleton" style="height: 300px"></div>
   {:else}
     <div class="layout">
-      <!-- LEFT: template list -->
       <aside class="template-list">
         {#each templates as t (t.key)}
           <button
@@ -168,7 +152,6 @@
         {/each}
       </aside>
 
-      <!-- CENTER: editor -->
       {#if selectedTemplate}
         <section class="editor">
           <header class="editor-head">
@@ -236,7 +219,6 @@
           </div>
         </section>
 
-        <!-- RIGHT: preview -->
         <aside class="preview">
           <h3 class="preview-title">Preview</h3>
           {#if preview}
@@ -266,23 +248,14 @@
 </div>
 
 <style>
-  .templates-page {
+  .templates-panel {
     max-width: 1400px;
   }
 
-  .page-header {
-    margin-block-end: var(--space-5);
-  }
-
-  .page-title {
-    font-size: var(--text-2xl);
-    font-weight: 700;
-    margin-block-end: var(--space-1);
-  }
-
-  .page-sub {
+  .panel-sub {
     font-size: var(--text-sm);
     color: var(--color-text-secondary);
+    margin-block-end: var(--space-4);
   }
 
   .layout {
@@ -292,7 +265,6 @@
     align-items: flex-start;
   }
 
-  /* LEFT: template list */
   .template-list {
     display: flex;
     flex-direction: column;
@@ -355,7 +327,6 @@
     font-family: var(--font-mono);
   }
 
-  /* CENTER: editor */
   .editor {
     display: flex;
     flex-direction: column;
@@ -458,7 +429,6 @@
     border-block-start: 1px solid var(--color-border);
   }
 
-  /* RIGHT: preview */
   .preview {
     display: flex;
     flex-direction: column;

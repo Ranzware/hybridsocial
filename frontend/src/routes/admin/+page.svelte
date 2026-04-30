@@ -227,7 +227,7 @@
         { href: '/admin/federation', icon: 'hub', label: 'Federation' },
         { href: '/admin/theme', icon: 'palette', label: 'Theme & branding' },
         { href: '/admin/announcements', icon: 'campaign', label: 'Announcements' },
-        { href: '/admin/email', icon: 'mail', label: 'Email' },
+        { href: '/admin/email', icon: 'mail', label: 'Email settings' },
         { href: '/admin/tiers', icon: 'workspace_premium', label: 'Tiers' },
         { href: '/admin/audit-log', icon: 'list', label: 'Audit log' },
       ] as action (action.href)}

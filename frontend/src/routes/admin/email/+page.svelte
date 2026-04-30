@@ -3,6 +3,18 @@
   import { addToast } from '$lib/stores/toast.js';
   import { getEmailConfig, updateEmailConfig, sendTestEmail } from '$lib/api/admin.js';
   import type { EmailConfig } from '$lib/api/types.js';
+  import Tabs from '$lib/components/ui/Tabs.svelte';
+  import EmailTemplatesPanel from '$lib/components/admin/EmailTemplatesPanel.svelte';
+
+  // Two related concerns lived on separate routes (/admin/email and
+  // /admin/email-templates) — fold them into one tabbed Email Settings
+  // page so the SMTP config and the per-message templates aren't a
+  // sidebar click apart.
+  const tabs = [
+    { id: 'server', label: 'Server' },
+    { id: 'templates', label: 'Templates' }
+  ];
+  let activeTab = $state('server');
 
   let config: EmailConfig | null = $state(null);
   let loading = $state(true);
@@ -68,19 +80,21 @@
 </script>
 
 <svelte:head>
-  <title>Email - Admin</title>
+  <title>Email Settings - Admin</title>
 </svelte:head>
 
 <div class="email-page">
-  <h1 class="page-title">Email Configuration</h1>
+  <h1 class="page-title">Email Settings</h1>
 
-  {#if loading}
-    <div class="card">
-      {#each Array(4) as _}
-        <div class="skeleton" style="height: 40px; margin-bottom: 12px"></div>
-      {/each}
-    </div>
-  {:else}
+  <Tabs {tabs} bind:active={activeTab}>
+    {#if activeTab === 'server'}
+      {#if loading}
+        <div class="card">
+          {#each Array(4) as _}
+            <div class="skeleton" style="height: 40px; margin-bottom: 12px"></div>
+          {/each}
+        </div>
+      {:else}
     <section class="card">
       <h2 class="section-title">SMTP Settings</h2>
 
@@ -141,7 +155,11 @@
         </button>
       </form>
     </section>
-  {/if}
+      {/if}
+    {:else if activeTab === 'templates'}
+      <EmailTemplatesPanel />
+    {/if}
+  </Tabs>
 </div>
 
 <style>
