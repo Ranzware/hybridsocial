@@ -133,12 +133,15 @@
         (locationFilter === 'local' && (u as any).is_local !== false) ||
         (locationFilter === 'remote' && (u as any).is_local === false);
       const isLocal = (u as any).is_local !== false;
+      const isSubaccountUser = !!(u as any).parent_identity_id;
       const matchesEmail =
         emailFilter === 'all' ||
-        // Only apply the email filter to local accounts. Remote rows
-        // would otherwise match "unverified" en masse since we don't
-        // own their verification state.
+        // Only apply the email filter to top-level local accounts.
+        // Remote rows have no local verification state we control;
+        // subaccounts (bots/groups/pages) inherit their parent's,
+        // so they never own an email of their own.
         !isLocal ||
+        isSubaccountUser ||
         (emailFilter === 'verified' && (u as any).email_confirmed === true) ||
         (emailFilter === 'unverified' && (u as any).email_confirmed === false);
       return matchesSearch && matchesStatus && matchesLocation && matchesEmail;
@@ -210,10 +213,20 @@
   // an admin scanning the table can spot stalled signups at a glance.
   // Remote rows are excluded — we don't own their email confirmation
   // state and would otherwise tint half the federated table.
-  function rowClassFor(row: Record<string, unknown>): string {
+  // Subaccounts (bots, groups, pages owned by another user) inherit
+  // their parent's verification, so they never carry their own email
+  // and shouldn't show the unverified marker either.
+  function isSubaccount(row: Record<string, unknown>): boolean {
+    return !!row['parent_identity_id'];
+  }
+
+  function shouldFlagUnverified(row: Record<string, unknown>): boolean {
     const isLocal = row['is_local'] !== false;
-    if (isLocal && row['email_confirmed'] === false) return 'row-email-unverified';
-    return '';
+    return isLocal && !isSubaccount(row) && row['email_confirmed'] === false;
+  }
+
+  function rowClassFor(row: Record<string, unknown>): string {
+    return shouldFlagUnverified(row) ? 'row-email-unverified' : '';
   }
 
   onMount(async () => {
@@ -725,7 +738,7 @@
       <td>
         <div class="email-cell">
           <span>{row['email'] || ''}</span>
-          {#if row['is_local'] !== false && row['email_confirmed'] === false}
+          {#if shouldFlagUnverified(row)}
             <span class="email-unverified-pill" title="Email not confirmed">unverified</span>
           {/if}
         </div>

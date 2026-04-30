@@ -53,15 +53,23 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
     alias Hybridsocial.Social.Post
     alias Hybridsocial.Moderation.Report
 
-    # Core stats — local users only. Federated identities live in the
-    # same table but they're counted via `known_instances` below.
-    # Mixing them into "total users" would inflate the headline number
-    # the moment a single remote account fetches a federated profile.
+    # Core stats — local top-level users only. Federated identities
+    # live in the same table; mixing them into "total users" would
+    # inflate the headline number the moment a single remote account
+    # fetched a profile. The earlier ap_actor_url IS NULL filter was
+    # wrong because every local user *also* has an ap_actor_url (their
+    # own federation URL) — what marks a row as local is that URL's
+    # host matching this instance's. Subaccounts (bots/pages/groups)
+    # are excluded by both the type guard and parent_identity_id.
+    local_host = URI.parse(HybridsocialWeb.Endpoint.url()).host
+
     total_users =
       Identity
       |> where(
         [i],
-        i.type == "user" and is_nil(i.deleted_at) and is_nil(i.ap_actor_url)
+        i.type == "user" and is_nil(i.deleted_at) and is_nil(i.parent_identity_id) and
+          (is_nil(i.ap_actor_url) or
+             fragment("split_part(?, '/', 3) = ?", i.ap_actor_url, ^local_host))
       )
       |> Repo.aggregate(:count)
 
