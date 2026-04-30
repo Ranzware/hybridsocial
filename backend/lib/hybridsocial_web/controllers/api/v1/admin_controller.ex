@@ -26,6 +26,24 @@ defmodule HybridsocialWeb.Api.V1.AdminController do
     |> json(%{error: "permission.denied", required: permission})
   end
 
+  # ── Service metrics ──────────────────────────────────────────────────
+
+  def metrics_summary(conn, _params) do
+    json(conn, %{services: Hybridsocial.Metrics.Query.summary()})
+  end
+
+  def metrics_series(conn, %{"service" => service, "metric" => metric} = params) do
+    window = Map.get(params, "window", "1h")
+
+    case Hybridsocial.Metrics.Query.series(service, metric, window) do
+      {:error, :invalid_window} ->
+        conn |> put_status(:bad_request) |> json(%{error: "invalid_window"})
+
+      payload ->
+        json(conn, payload)
+    end
+  end
+
   # ── Dashboard ─────────────────────────────────────────────────────────
 
   def dashboard(conn, _params) do

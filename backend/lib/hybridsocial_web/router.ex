@@ -689,6 +689,11 @@ defmodule HybridsocialWeb.Router do
     # Dashboard
     get "/dashboard", AdminController, :dashboard
 
+    # Service metrics — current values + 1h sparklines (summary), and
+    # per-(service, metric) windowed series for the expanded chart.
+    get "/metrics/summary", AdminController, :metrics_summary
+    get "/metrics/series", AdminController, :metrics_series
+
     # Instance Settings
     get "/settings", AdminController, :list_settings
     put "/settings", AdminController, :update_settings

@@ -54,7 +54,12 @@ defmodule Hybridsocial.Application do
             # Prunes approved/rejected appeals older than appeal_retention_days (default 90)
             Hybridsocial.Moderation.AppealExpiryWorker,
             # Drains the webhook delivery queue with exponential backoff
-            Hybridsocial.Moderation.WebhookDeliveryWorker
+            Hybridsocial.Moderation.WebhookDeliveryWorker,
+            # Polls Postgres / Valkey / NATS / OpenSearch every 60s and
+            # writes samples for the admin dashboard charts.
+            Hybridsocial.Metrics.Collector,
+            # Daily prune of metrics rows past the retention window.
+            Hybridsocial.Metrics.Retention
           ],
           else: []
         ) ++

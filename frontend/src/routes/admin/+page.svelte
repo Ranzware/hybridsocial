@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import StatsCard from '$lib/components/admin/StatsCard.svelte';
+  import ServicePanel from '$lib/components/admin/ServicePanel.svelte';
   import { addToast } from '$lib/stores/toast.js';
+  import { api } from '$lib/api/client.js';
   import { getDashboardStats, getRecentReports, getVerifications, approveVerification, rejectVerification } from '$lib/api/admin.js';
   import type { AdminDashboardStats, AdminReport, ServiceHealth } from '$lib/api/types.js';
   import type { VerificationRequest } from '$lib/api/admin.js';
@@ -10,6 +12,70 @@
   let recentReports: AdminReport[] = $state([]);
   let pendingVerifications: VerificationRequest[] = $state([]);
   let loading = $state(true);
+
+  // Historical service metrics (1h sparklines + latest values).
+  // Polled separately from the dashboard summary so a slow probe
+  // doesn't delay the rest of the page.
+  type MetricRow = {
+    service: string;
+    metric: string;
+    latest: { t: string; v: number };
+    sparkline: { t: string; v: number }[];
+  };
+  let metricRows: MetricRow[] = $state([]);
+
+  function fmtBytes(n: number): string {
+    if (!Number.isFinite(n) || n <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return v.toFixed(v >= 100 ? 0 : v >= 10 ? 1 : 2) + ' ' + units[i];
+  }
+  function fmtInt(n: number): string {
+    return Math.round(n).toLocaleString();
+  }
+  function fmtRate(n: number, suffix = '/s'): string {
+    return Math.round(n).toLocaleString() + suffix;
+  }
+  function fmtPct(n: number): string {
+    return (n * 100).toFixed(1) + '%';
+  }
+  function fmtClusterStatus(n: number): string {
+    return ['green', 'yellow', 'red'][Math.round(n)] ?? '?';
+  }
+
+  const pgMetrics = [
+    { key: 'connections_active', label: 'Active conns', format: fmtInt },
+    { key: 'connections_idle', label: 'Idle conns', format: fmtInt },
+    { key: 'db_size_bytes', label: 'DB size', format: fmtBytes },
+    { key: 'xact_commit', label: 'Commits/s', format: (v: number) => fmtRate(v) },
+    { key: 'cache_hit_ratio', label: 'Cache hit', format: fmtPct },
+  ];
+  const valkeyMetrics = [
+    { key: 'memory_used_bytes', label: 'Memory', format: fmtBytes },
+    { key: 'memory_peak_bytes', label: 'Peak', format: fmtBytes },
+    { key: 'total_keys', label: 'Keys', format: fmtInt },
+    { key: 'connected_clients', label: 'Clients', format: fmtInt },
+    { key: 'ops_per_sec', label: 'Ops/sec', format: (v: number) => fmtRate(v) },
+    { key: 'evicted_keys', label: 'Evictions/s', format: (v: number) => fmtRate(v) },
+  ];
+  const natsMetrics = [
+    { key: 'connections', label: 'Connections', format: fmtInt },
+    { key: 'in_msgs', label: 'In msgs/s', format: (v: number) => fmtRate(v) },
+    { key: 'out_msgs', label: 'Out msgs/s', format: (v: number) => fmtRate(v) },
+    { key: 'jetstream_messages', label: 'JS messages', format: fmtInt },
+    { key: 'jetstream_bytes', label: 'JS bytes', format: fmtBytes },
+  ];
+  const opensearchMetrics = [
+    { key: 'cluster_status', label: 'Cluster', format: fmtClusterStatus },
+    { key: 'index_count', label: 'Indices', format: fmtInt },
+    { key: 'total_docs', label: 'Total docs', format: fmtInt },
+    { key: 'index_size_bytes', label: 'Index size', format: fmtBytes },
+    { key: 'unassigned_shards', label: 'Unassigned', format: fmtInt },
+  ];
+
+  let hasOpensearchData = $derived(metricRows.some((r) => r.service === 'opensearch'));
 
   function formatUptime(seconds: number | undefined): string {
     if (!seconds) return '';
@@ -20,6 +86,17 @@
     if (hours > 0) return `${hours}h ${mins}m`;
     return `${mins}m`;
   }
+
+  async function loadMetrics() {
+    try {
+      const res = await api.get<{ services: MetricRow[] }>('/api/v1/admin/metrics/summary');
+      metricRows = res.services || [];
+    } catch {
+      metricRows = [];
+    }
+  }
+
+  let metricsTimer: ReturnType<typeof setInterval> | null = null;
 
   onMount(async () => {
     try {
@@ -36,6 +113,16 @@
     } finally {
       loading = false;
     }
+
+    // Metrics summary is loaded after the main payload. The collector
+    // ticks every 60s, so refreshing the dashboard at the same cadence
+    // keeps the sparklines moving without piling on load.
+    loadMetrics();
+    metricsTimer = setInterval(loadMetrics, 60_000);
+  });
+
+  onDestroy(() => {
+    if (metricsTimer) clearInterval(metricsTimer);
   });
 
   async function handleApproveVerification(id: string) {
@@ -251,6 +338,42 @@
       </div>
     </section>
   {/if}
+
+  <section class="services-section metrics-section">
+    <h2 class="section-heading">Service metrics</h2>
+    <div class="metrics-grid">
+      <ServicePanel
+        title="PostgreSQL"
+        icon="database"
+        service="postgres"
+        metrics={pgMetrics}
+        rows={metricRows}
+      />
+      <ServicePanel
+        title="Valkey"
+        icon="bolt"
+        service="valkey"
+        metrics={valkeyMetrics}
+        rows={metricRows}
+      />
+      <ServicePanel
+        title="NATS"
+        icon="hub"
+        service="nats"
+        metrics={natsMetrics}
+        rows={metricRows}
+      />
+      {#if hasOpensearchData}
+        <ServicePanel
+          title="OpenSearch"
+          icon="search"
+          service="opensearch"
+          metrics={opensearchMetrics}
+          rows={metricRows}
+        />
+      {/if}
+    </div>
+  </section>
 
   <div class="dashboard-panels">
     <section class="panel card">
@@ -590,6 +713,12 @@
   .services-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-3);
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: var(--space-3);
   }
 
