@@ -111,14 +111,18 @@ defmodule Hybridsocial.Federation.DeliveryStats do
           }
       )
 
-    # Reshape to {bucket_ts => %{type => count}}.
+    # `date_bin` returns a `timestamp` (no tz), which Ecto hands back as
+    # a NaiveDateTime — promote to UTC DateTime so Phoenix's JSON
+    # encoder emits a `Z` suffix the browser can parse correctly, and
+    # the sort comparator below has the right struct type.
     grouped =
       Enum.reduce(rows, %{}, fn %{t: t, type: type, count: count}, acc ->
+        bucket_ts = naive_to_utc(t)
         type_label = type || "Other"
 
         Map.update(
           acc,
-          t,
+          bucket_ts,
           %{type_label => count},
           fn existing -> Map.update(existing, type_label, count, &(&1 + count)) end
         )
@@ -191,4 +195,8 @@ defmodule Hybridsocial.Federation.DeliveryStats do
   end
 
   defp domain_of(_), do: nil
+
+  defp naive_to_utc(%NaiveDateTime{} = ndt), do: DateTime.from_naive!(ndt, "Etc/UTC")
+  defp naive_to_utc(%DateTime{} = dt), do: dt
+  defp naive_to_utc(other), do: other
 end
