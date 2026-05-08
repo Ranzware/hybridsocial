@@ -79,6 +79,13 @@ defmodule HybridsocialWeb.Api.V1.DraftController do
       media_ids: draft.media_ids || [],
       parent_id: draft.parent_id,
       quote_id: draft.quote_id,
+      group_id: draft.group_id,
+      page_id: draft.page_id,
+      # Mirror PostSerializer's group / page summaries so the drafts
+      # list can render the same chip — saves the frontend a follow-up
+      # fetch just to look up the name + avatar.
+      group: group_summary_for(draft.group_id),
+      page: page_summary_for(draft.page_id),
       scheduled_at: draft.scheduled_at,
       poll_options: draft.poll_options,
       poll_multiple: draft.poll_multiple,
@@ -86,6 +93,37 @@ defmodule HybridsocialWeb.Api.V1.DraftController do
       created_at: draft.inserted_at,
       updated_at: draft.updated_at
     }
+  end
+
+  defp group_summary_for(nil), do: nil
+
+  defp group_summary_for(id) when is_binary(id) do
+    case Hybridsocial.Repo.get(Hybridsocial.Groups.Group, id) do
+      nil -> nil
+      g -> %{id: g.id, name: g.name, avatar_url: g.avatar_url, visibility: g.visibility}
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp page_summary_for(nil), do: nil
+
+  defp page_summary_for(id) when is_binary(id) do
+    case Hybridsocial.Pages.get_page(id) do
+      nil ->
+        nil
+
+      identity ->
+        name =
+          case Map.get(identity, :organization) do
+            %{name: n} when is_binary(n) and n != "" -> n
+            _ -> identity.display_name || identity.handle
+          end
+
+        %{id: identity.id, name: name, avatar_url: identity.avatar_url}
+    end
+  rescue
+    _ -> nil
   end
 
   defp format_errors(%Ecto.Changeset{} = changeset) do

@@ -84,6 +84,19 @@
       {#each drafts as draft (draft.id)}
         <li class="draft-card">
           <div class="draft-body">
+            {#if draft.group}
+              <a class="draft-target draft-target-group" href={`/groups/${draft.group.id}`}>
+                <span class="material-symbols-outlined draft-target-icon" aria-hidden="true">groups</span>
+                <span class="draft-target-label">Posting to</span>
+                <span class="draft-target-name">{draft.group.name}</span>
+              </a>
+            {:else if draft.page}
+              <a class="draft-target draft-target-page" href={`/@${draft.page.id}`}>
+                <span class="material-symbols-outlined draft-target-icon" aria-hidden="true">description</span>
+                <span class="draft-target-label">Posting on</span>
+                <span class="draft-target-name">{draft.page.name}</span>
+              </a>
+            {/if}
             {#if draft.spoiler_text}
               <p class="draft-cw">CW: {draft.spoiler_text}</p>
             {/if}
@@ -192,6 +205,47 @@
   .draft-body {
     flex: 1;
     min-width: 0;
+  }
+
+  .draft-target {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    background: var(--color-primary-soft, var(--color-surface-container-low));
+    color: var(--color-primary);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    text-decoration: none;
+    margin-block-end: var(--space-2);
+    /* Lets the chip wrap nicely if the group / page name is long
+       instead of pushing the row out and clipping. */
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    transition: background var(--transition-fast);
+  }
+
+  .draft-target:hover {
+    background: var(--color-primary);
+    color: var(--color-on-primary);
+    text-decoration: none;
+  }
+
+  .draft-target-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .draft-target-label {
+    color: inherit;
+    opacity: 0.8;
+  }
+
+  .draft-target-name {
+    font-weight: 700;
   }
 
   .draft-cw {

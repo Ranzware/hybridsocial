@@ -15,6 +15,16 @@ defmodule Hybridsocial.Social.PostDraft do
     field :media_ids, {:array, :binary_id}, default: []
     field :scheduled_at, :utc_datetime_usec
 
+    # Anchor for the eventual post: a draft started inside a group or on
+    # a page carries that context so resuming it from the drafts list
+    # publishes back to the same place. Plain `:binary_id` (not a
+    # belongs_to) to match how `posts.group_id` / `posts.page_id` are
+    # modeled — pages are Identity rows, not their own schema, and we
+    # don't need an FK constraint here since the draft is private and
+    # publishing re-validates.
+    field :group_id, :binary_id
+    field :page_id, :binary_id
+
     field :poll_options, {:array, :string}
     field :poll_multiple, :boolean, default: false
     field :poll_expires_at, :utc_datetime_usec
@@ -35,6 +45,8 @@ defmodule Hybridsocial.Social.PostDraft do
     :media_ids,
     :parent_id,
     :quote_id,
+    :group_id,
+    :page_id,
     :scheduled_at,
     :poll_options,
     :poll_multiple,

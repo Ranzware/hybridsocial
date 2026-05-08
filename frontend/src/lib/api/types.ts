@@ -188,6 +188,14 @@ export interface PostDraft {
   media_ids: string[];
   parent_id: string | null;
   quote_id: string | null;
+  /** Group anchor — when set, publishing posts to this group. */
+  group_id: string | null;
+  /** Page anchor — when set, publishing posts to this page. */
+  page_id: string | null;
+  /** Group summary for displaying the "Posting to <group>" chip. */
+  group?: { id: string; name: string; avatar_url?: string | null; visibility?: string } | null;
+  /** Page summary for the "Posting to <page>" chip. */
+  page?: { id: string; name: string; avatar_url?: string | null } | null;
   scheduled_at: string | null;
   poll_options: string[] | null;
   poll_multiple: boolean;

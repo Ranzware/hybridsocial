@@ -315,6 +315,18 @@
     spoilerText = draft.spoiler_text || '';
     showCW = !!draft.spoiler_text;
     visibility = (draft.visibility as 'public' | 'followers' | 'direct') || 'public';
+    // Restore the group / page anchor + the matching context label so
+    // the user sees the "Posting to <group>" banner on resume,
+    // not a confusing reset to "Posting to your profile".
+    groupId = draft.group_id ?? null;
+    pageId = draft.page_id ?? null;
+    if (groupId && draft.group) {
+      contextLabel = `Posting to ${draft.group.name}`;
+    } else if (pageId && draft.page) {
+      contextLabel = `Posting to ${draft.page.name}`;
+    } else {
+      contextLabel = null;
+    }
     if (draft.scheduled_at) {
       showSchedule = true;
       scheduledAt = draft.scheduled_at;
@@ -353,6 +365,12 @@
         media_ids: uploadedMedia.map((m) => m.id),
         parent_id: replyTo?.id ?? null,
         quote_id: quotePost?.id ?? null,
+        // Persist the group / page anchor so resuming the draft from
+        // the drafts list publishes back to the same place. Without
+        // these, a "saved draft" silently degraded to a profile post
+        // on resume.
+        group_id: groupId,
+        page_id: pageId,
         scheduled_at: showSchedule && scheduledAt ? new Date(scheduledAt).toISOString() : null,
         poll_options: showPoll ? pollOptions.filter((o) => o.trim()) : null,
         poll_multiple: showPoll && pollMultiple,
