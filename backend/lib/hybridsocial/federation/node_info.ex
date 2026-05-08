@@ -237,6 +237,10 @@ defmodule Hybridsocial.Federation.NodeInfo do
   @fetch_timeout_ms 2_000
 
   defp fetch_json(url) do
+    # NodeInfo is intentionally unsigned by spec — instances expose it
+    # publicly so any client (statistics aggregators, the-federation.info,
+    # admin dashboards) can pull instance metadata without keys. Do not
+    # route through SignedFetch.
     headers = [{"Accept", "application/json"}]
 
     options = [

@@ -101,6 +101,71 @@ defmodule Hybridsocial.Federation.HTTPSignatureTest do
     end
   end
 
+  describe "sign_get/3" do
+    test "returns Signature/Date/Host but NOT Digest", %{private_pem: private_pem} do
+      key_id = "https://local.example/actor#main-key"
+      headers = HTTPSignature.sign_get("https://remote.example/users/foo", private_pem, key_id)
+
+      assert Map.has_key?(headers, "Signature")
+      assert Map.has_key?(headers, "Date")
+      assert Map.has_key?(headers, "Host")
+      refute Map.has_key?(headers, "Digest")
+      assert headers["Host"] == "remote.example"
+      assert String.contains?(headers["Signature"], ~s(keyId="#{key_id}"))
+      assert String.contains?(headers["Signature"], ~s(algorithm="rsa-sha256"))
+      # GET signatures must NOT include digest in the headers list — the
+      # request has no body and signing a digest of "" would let an
+      # attacker swap a signed GET for any other body-less request.
+      assert String.contains?(headers["Signature"], ~s|headers="(request-target) host date"|)
+    end
+
+    test "preserves query string in (request-target)", %{
+      private_pem: private_pem,
+      public_pem: public_pem
+    } do
+      key_id = "https://local.example/actor#main-key"
+      url = "https://remote.example/actors/abc/outbox?page=1&min_id=42"
+      headers = HTTPSignature.sign_get(url, private_pem, key_id)
+
+      # Reconstruct what the signer computed and check the public key
+      # verifies it. If query was dropped from (request-target) we'd
+      # mismatch here.
+      params =
+        headers["Signature"]
+        |> String.split(",")
+        |> Enum.map(fn part ->
+          [k, v] = String.split(part, "=", parts: 2)
+          {String.trim(k), String.trim(v, "\"")}
+        end)
+        |> Map.new()
+
+      request_data = %{
+        "(request-target)" => "get /actors/abc/outbox?page=1&min_id=42",
+        "host" => headers["Host"],
+        "date" => headers["Date"]
+      }
+
+      signing_string =
+        HTTPSignature.build_signing_string(
+          String.split(params["headers"], " "),
+          request_data
+        )
+
+      [pem_entry] = :public_key.pem_decode(public_pem)
+      pub_key = :public_key.pem_entry_decode(pem_entry)
+      signature = Base.decode64!(params["signature"])
+
+      assert :public_key.verify(signing_string, :sha256, signature, pub_key)
+    end
+
+    test "uses '/' for empty path", %{private_pem: private_pem} do
+      key_id = "https://local.example/actor#main-key"
+      headers = HTTPSignature.sign_get("https://remote.example", private_pem, key_id)
+      # Should not crash and should produce a valid Signature header.
+      assert Map.has_key?(headers, "Signature")
+    end
+  end
+
   describe "verify/1 — date-header freshness" do
     # The full signature path requires an HTTP fetch of the public
     # key, so we exercise the date check in isolation by building a

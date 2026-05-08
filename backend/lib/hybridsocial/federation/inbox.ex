@@ -462,7 +462,9 @@ defmodule Hybridsocial.Federation.Inbox do
         end)
 
       case Repo.transaction(multi) do
-        {:ok, _} -> :ok
+        {:ok, _} ->
+          :ok
+
         {:error, _step, reason, _} ->
           Logger.warning("Failed to persist remote poll for #{post_id}: #{inspect(reason)}")
           :ok
@@ -491,9 +493,7 @@ defmodule Hybridsocial.Federation.Inbox do
           not is_binary(post.ap_id) or post.ap_id == "" ->
             {:error, :not_remote}
 
-          Repo.exists?(
-            Ecto.Query.where(Hybridsocial.Social.Poll, [p], p.post_id == ^post.id)
-          ) ->
+          Repo.exists?(Ecto.Query.where(Hybridsocial.Social.Poll, [p], p.post_id == ^post.id)) ->
             {:ok, :already_persisted}
 
           true ->
@@ -507,12 +507,10 @@ defmodule Hybridsocial.Federation.Inbox do
   end
 
   defp fetch_ap_object(ap_id) do
-    headers = [
-      {"Accept", "application/activity+json"},
-      {"User-Agent", "HybridSocial Federation"}
-    ]
-
-    case HTTPoison.get(ap_id, headers, follow_redirect: true, recv_timeout: 10_000) do
+    case Hybridsocial.Federation.SignedFetch.get(ap_id,
+           follow_redirect: true,
+           recv_timeout: 10_000
+         ) do
       {:ok, %{status_code: 200, body: body}} ->
         case Jason.decode(body) do
           {:ok, ap} -> {:ok, ap}
@@ -830,10 +828,12 @@ defmodule Hybridsocial.Federation.Inbox do
             # poll on creation, so duplicates aren't a concern.
             for opt <- options do
               name = opt["name"]
-              count = case opt do
-                %{"replies" => %{"totalItems" => n}} when is_integer(n) -> n
-                _ -> 0
-              end
+
+              count =
+                case opt do
+                  %{"replies" => %{"totalItems" => n}} when is_integer(n) -> n
+                  _ -> 0
+                end
 
               if is_binary(name) do
                 Hybridsocial.Social.PollOption
@@ -1163,6 +1163,10 @@ defmodule Hybridsocial.Federation.Inbox do
     if domain && username do
       url = "https://#{domain}/api/v1/accounts/lookup?acct=#{username}"
 
+      # Mastodon REST API (NOT ActivityPub). Last-ditch fallback for
+      # peers whose AP actor JSON we couldn't fetch. Mastodon's
+      # /api/v1/accounts/lookup is unauthenticated by design — don't
+      # signed-fetch this.
       headers = [
         {"Accept", "application/json"},
         {"User-Agent", "HybridSocial/0.1.0"}
@@ -1194,6 +1198,10 @@ defmodule Hybridsocial.Federation.Inbox do
     end
   end
 
+  # Explicitly unsigned variant. The cascade in `fetch_remote_actor_profile`
+  # tries this first to avoid a wasted round-trip on peers that don't run
+  # secure mode; on 401/403 the caller falls back to `fetch_actor_json(url, true)`
+  # which signed-fetches via SignedFetch.
   defp fetch_actor_json(url, false) do
     headers = [
       {"Accept", "application/activity+json, application/ld+json"},
@@ -1212,73 +1220,24 @@ defmodule Hybridsocial.Federation.Inbox do
     end
   end
 
+  # Signed-fetch path. Goes through SignedFetch which signs with the
+  # instance actor — using a random user identity (the previous
+  # implementation) leaked one user's identity into every cross-instance
+  # lookup and broke when that user was later deleted.
   defp fetch_actor_json(url, true) do
-    # Find a local identity with a private key to sign the request
-    signing_identity =
-      Repo.one(
-        from(i in Identity,
-          where: not is_nil(i.private_key) and is_nil(i.deleted_at),
-          limit: 1
-        )
-      )
+    case Hybridsocial.Federation.SignedFetch.get(url, recv_timeout: 10_000, timeout: 10_000) do
+      {:ok, %{status_code: 200, body: body}} ->
+        Jason.decode(body)
 
-    if is_nil(signing_identity) do
-      {:error, :no_signing_key}
-    else
-      domain = HybridsocialWeb.Endpoint.host()
-      key_id = signing_identity.ap_actor_url <> "#main-key"
-      parsed = URI.parse(url)
-      date = Calendar.strftime(DateTime.utc_now(), "%a, %d %b %Y %H:%M:%S GMT")
+      {:ok, %{status_code: status}} ->
+        require Logger
+        Logger.warning("Signed fetch failed for #{url}: HTTP #{status}")
+        {:error, :signed_fetch_failed}
 
-      # Build signing string for GET (no digest needed)
-      signed_headers = ["(request-target)", "host", "date"]
-
-      request_data = %{
-        "(request-target)" => "get #{parsed.path}",
-        "host" => parsed.host,
-        "date" => date
-      }
-
-      signing_string =
-        signed_headers
-        |> Enum.map(fn h -> "#{h}: #{request_data[h]}" end)
-        |> Enum.join("\n")
-
-      signature =
-        signing_identity.private_key
-        |> :public_key.pem_decode()
-        |> hd()
-        |> :public_key.pem_entry_decode()
-        |> then(fn key ->
-          :public_key.sign(signing_string, :sha256, key)
-          |> Base.encode64()
-        end)
-
-      sig_header =
-        ~s(keyId="#{key_id}",algorithm="rsa-sha256",headers="#{Enum.join(signed_headers, " ")}",signature="#{signature}")
-
-      headers = [
-        {"Accept", "application/activity+json, application/ld+json"},
-        {"User-Agent", "HybridSocial/0.1.0 (+https://#{domain})"},
-        {"Signature", sig_header},
-        {"Date", date},
-        {"Host", parsed.host}
-      ]
-
-      case HTTPoison.get(url, headers, recv_timeout: 10_000, timeout: 10_000) do
-        {:ok, %{status_code: 200, body: body}} ->
-          Jason.decode(body)
-
-        {:ok, %{status_code: status}} ->
-          require Logger
-          Logger.warning("Signed fetch failed for #{url}: HTTP #{status}")
-          {:error, :signed_fetch_failed}
-
-        {:error, reason} ->
-          require Logger
-          Logger.warning("Signed fetch error for #{url}: #{inspect(reason)}")
-          {:error, :signed_fetch_failed}
-      end
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Signed fetch error for #{url}: #{inspect(reason)}")
+        {:error, :signed_fetch_failed}
     end
   end
 
@@ -1551,9 +1510,26 @@ defmodule Hybridsocial.Federation.Inbox do
           "spoiler_text" => object["summary"]
         }
 
-        post
-        |> Post.edit_changeset(attrs)
-        |> Repo.update()
+        case post |> Post.edit_changeset(attrs) |> Repo.update() do
+          {:ok, updated_post} = ok ->
+            # Mirror the local edit broadcast (Posts.edit_post/4)
+            # so a local user replying to a remote post also gets
+            # the live "edited" indicator when the origin author
+            # ships an Update activity.
+            Phoenix.PubSub.broadcast(
+              Hybridsocial.PubSub,
+              "post:#{updated_post.id}",
+              %{
+                event: "edit",
+                payload: %{id: updated_post.id, edited_at: updated_post.edited_at}
+              }
+            )
+
+            ok
+
+          err ->
+            err
+        end
 
       %Post{} ->
         {:error, :forbidden}

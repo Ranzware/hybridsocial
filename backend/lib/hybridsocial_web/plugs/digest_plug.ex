@@ -3,7 +3,12 @@ defmodule HybridsocialWeb.Plugs.DigestPlug do
   Validates the Digest header on incoming POST requests to inbox endpoints.
 
   Computes SHA-256 of the request body and compares it against the provided
-  Digest header. Rejects with 401 on mismatch.
+  Digest header. Rejects with 401 on mismatch — and on absence, because
+  allowing missing-Digest POSTs lets an attacker replay a captured
+  Signature with a tampered body whenever the signed-headers list happens
+  to omit "digest" (which the verifier honors as-is). Every modern
+  fediverse server sends Digest on inbox POSTs; refusing without it closes
+  the body-tampering window without breaking real peers.
   """
   import Plug.Conn
 
@@ -17,12 +22,27 @@ defmodule HybridsocialWeb.Plugs.DigestPlug do
         verify_digest(conn, digest_header)
 
       [] ->
-        # No digest header — allow through (some implementations omit it)
-        conn
+        if signature_check_enabled?() do
+          Logger.warning("Inbox POST missing Digest header (#{conn.request_path})")
+
+          conn
+          |> put_status(401)
+          |> Phoenix.Controller.json(%{error: "Digest header required"})
+          |> halt()
+        else
+          # Test/dev mode where signature verification is disabled.
+          # Strictness is paired with the signature gate so the same
+          # switch toggles both: production enforces, fixtures pass.
+          conn
+        end
     end
   end
 
   def call(conn, _opts), do: conn
+
+  defp signature_check_enabled? do
+    Application.get_env(:hybridsocial, :federation_signature_check, true)
+  end
 
   defp verify_digest(conn, digest_header) do
     # Read the raw body — it should already be cached by Plug.Parsers

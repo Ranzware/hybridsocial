@@ -42,6 +42,9 @@ defmodule Hybridsocial.Federation.WebFinger do
     with :ok <- Hybridsocial.Security.UrlValidator.validate_domain(domain) do
       url = "https://#{domain}/.well-known/webfinger?resource=acct:#{URI.encode(acct)}"
 
+      # WebFinger (RFC 7033) is intentionally unsigned. Peers serve it
+      # without authorized-fetch because it's how new instances discover
+      # each other before any keys exist. Do not route through SignedFetch.
       headers = [
         {"Accept", "application/jrd+json"},
         {"User-Agent", "HybridSocial (+https://#{HybridsocialWeb.Endpoint.host()})"}

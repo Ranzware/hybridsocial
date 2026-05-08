@@ -114,6 +114,58 @@ defmodule Hybridsocial.Media.MediaProxyCache do
   def store(_, _, _), do: :ok
 
   @doc """
+  Promote an already-written file (typically a streaming-download
+  tmp file) into the cache. Renames the source into the canonical
+  cache layout and writes the DB row.
+
+  On success returns `{:ok, %{path: path, hash: hash}}` so the
+  caller can `send_file` directly. The source file is consumed —
+  callers must not use it afterwards.
+  """
+  def store_path(remote_url, source_path, content_type, byte_size)
+      when is_binary(remote_url) and is_binary(source_path) and is_binary(content_type) and
+             is_integer(byte_size) do
+    if enabled?() do
+      hash = hash_url(remote_url)
+      relative = path_for(hash)
+      absolute = absolute_path(relative)
+
+      with :ok <- File.mkdir_p(Path.dirname(absolute)),
+           :ok <- rename_or_copy(source_path, absolute),
+           {:ok, _entry} <-
+             upsert_entry_meta(hash, remote_url, content_type, byte_size, relative) do
+        {:ok, %{path: absolute, hash: hash}}
+      else
+        {:error, reason} ->
+          File.rm(source_path)
+          {:error, reason}
+      end
+    else
+      File.rm(source_path)
+      :ok
+    end
+  end
+
+  # File.rename/2 is atomic on the same filesystem but fails with
+  # :exdev if /tmp lives on a different device than the uploads
+  # volume. Fall back to copy+delete in that case.
+  defp rename_or_copy(source, dest) do
+    case File.rename(source, dest) do
+      :ok ->
+        :ok
+
+      {:error, :exdev} ->
+        with :ok <- File.cp(source, dest) do
+          File.rm(source)
+          :ok
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
   Bump `last_accessed_at` so this entry survives the next LRU
   eviction. Best-effort — failures are ignored since stale
   timestamps only cost us a re-fetch later.
@@ -225,6 +277,10 @@ defmodule Hybridsocial.Media.MediaProxyCache do
   end
 
   defp upsert_entry(hash, remote_url, content_type, body, storage_path) do
+    upsert_entry_meta(hash, remote_url, content_type, byte_size(body), storage_path)
+  end
+
+  defp upsert_entry_meta(hash, remote_url, content_type, byte_size, storage_path) do
     now = DateTime.utc_now()
     domain = URI.parse(remote_url).host || "unknown"
 
@@ -233,7 +289,7 @@ defmodule Hybridsocial.Media.MediaProxyCache do
       remote_url: remote_url,
       remote_origin_domain: domain,
       content_type: content_type,
-      byte_size: byte_size(body),
+      byte_size: byte_size,
       storage_path: storage_path,
       fetched_at: now,
       last_accessed_at: now

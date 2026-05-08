@@ -93,53 +93,62 @@ defmodule Hybridsocial.Federation.Publisher do
 
   @doc """
   Delivers an activity to a specific inbox URL with HTTP signature.
+
+  Refuses to deliver if `identity.private_key` is nil — every modern
+  fediverse server rejects unsigned activity POSTs, so silently sending
+  an unsigned request would produce confusing "Invalid HTTP Signature"
+  failures from the remote and waste retry budget. The caller surfaces
+  this as a delivery failure into the dead-letter queue, where the
+  missing key shows up as a real signal.
   """
   def deliver(activity, inbox_url, identity) do
-    body = Jason.encode!(activity)
-    key_id = "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}#main-key"
+    if is_nil(identity.private_key) do
+      Logger.error(
+        "Federation delivery refused: identity #{identity.id} has no private_key " <>
+          "(would have sent unsigned POST to #{inbox_url}). " <>
+          "Re-run key generation for this identity."
+      )
 
-    headers =
-      if identity.private_key do
-        sig_headers =
-          HTTPSignature.sign(
-            %{url: inbox_url, method: "POST", body: body},
-            identity.private_key,
-            key_id
-          )
+      {:error, "missing_private_key"}
+    else
+      body = Jason.encode!(activity)
+      key_id = "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}#main-key"
 
-        [
-          {"Content-Type", @content_type},
-          {"Accept", @content_type}
-          | Enum.map(sig_headers, fn {k, v} -> {k, v} end)
-        ]
-      else
-        [
-          {"Content-Type", @content_type},
-          {"Accept", @content_type}
-        ]
-      end
+      sig_headers =
+        HTTPSignature.sign(
+          %{url: inbox_url, method: "POST", body: body},
+          identity.private_key,
+          key_id
+        )
 
-    # Time the network call so the admin Delivery Queue tab can chart
-    # p50/p95 latency per destination. Wall-clock includes DNS,
-    # connect, TLS handshake, request, and read — same thing a real
-    # client would experience.
-    started_at_ns = System.monotonic_time(:nanosecond)
+      headers = [
+        {"Content-Type", @content_type},
+        {"Accept", @content_type}
+        | Enum.map(sig_headers, fn {k, v} -> {k, v} end)
+      ]
 
-    result =
-      case HTTPoison.post(inbox_url, body, headers, recv_timeout: 15_000, timeout: 15_000) do
-        {:ok, %{status_code: status}} when status in 200..299 ->
-          {:ok, status}
+      # Time the network call so the admin Delivery Queue tab can chart
+      # p50/p95 latency per destination. Wall-clock includes DNS,
+      # connect, TLS handshake, request, and read — same thing a real
+      # client would experience.
+      started_at_ns = System.monotonic_time(:nanosecond)
 
-        {:ok, %{status_code: status, body: resp_body}} ->
-          {:error, "HTTP #{status}: #{String.slice(resp_body, 0, 500)}"}
+      result =
+        case HTTPoison.post(inbox_url, body, headers, recv_timeout: 15_000, timeout: 15_000) do
+          {:ok, %{status_code: status}} when status in 200..299 ->
+            {:ok, status}
 
-        {:error, %HTTPoison.Error{reason: reason}} ->
-          {:error, "Connection error: #{inspect(reason)}"}
-      end
+          {:ok, %{status_code: status, body: resp_body}} ->
+            {:error, "HTTP #{status}: #{String.slice(resp_body, 0, 500)}"}
 
-    duration_ms = div(System.monotonic_time(:nanosecond) - started_at_ns, 1_000_000)
-    Process.put(:hs_last_delivery_ms, duration_ms)
-    result
+          {:error, %HTTPoison.Error{reason: reason}} ->
+            {:error, "Connection error: #{inspect(reason)}"}
+        end
+
+      duration_ms = div(System.monotonic_time(:nanosecond) - started_at_ns, 1_000_000)
+      Process.put(:hs_last_delivery_ms, duration_ms)
+      result
+    end
   end
 
   @doc """
@@ -162,39 +171,41 @@ defmodule Hybridsocial.Federation.Publisher do
   def deliver_as_instance(activity, inbox_url) do
     alias Hybridsocial.Federation.InstanceActor
 
-    body = Jason.encode!(activity)
-    key_id = "#{InstanceActor.ap_id()}#main-key"
+    if InstanceActor.keys_configured?() do
+      body = Jason.encode!(activity)
+      key_id = "#{InstanceActor.ap_id()}#main-key"
 
-    headers =
-      if InstanceActor.keys_configured?() do
-        sig_headers =
-          HTTPSignature.sign(
-            %{url: inbox_url, method: "POST", body: body},
-            InstanceActor.private_key(),
-            key_id
-          )
+      sig_headers =
+        HTTPSignature.sign(
+          %{url: inbox_url, method: "POST", body: body},
+          InstanceActor.private_key(),
+          key_id
+        )
 
-        [
-          {"Content-Type", @content_type},
-          {"Accept", @content_type}
-          | Enum.map(sig_headers, fn {k, v} -> {k, v} end)
-        ]
-      else
-        [
-          {"Content-Type", @content_type},
-          {"Accept", @content_type}
-        ]
+      headers = [
+        {"Content-Type", @content_type},
+        {"Accept", @content_type}
+        | Enum.map(sig_headers, fn {k, v} -> {k, v} end)
+      ]
+
+      case HTTPoison.post(inbox_url, body, headers, recv_timeout: 15_000, timeout: 15_000) do
+        {:ok, %{status_code: status}} when status in 200..299 ->
+          {:ok, status}
+
+        {:ok, %{status_code: status, body: resp_body}} ->
+          {:error, "HTTP #{status}: #{String.slice(resp_body, 0, 500)}"}
+
+        {:error, %HTTPoison.Error{reason: reason}} ->
+          {:error, "Connection error: #{inspect(reason)}"}
       end
+    else
+      Logger.error(
+        "Federation delivery refused: instance actor has no keys configured " <>
+          "(would have sent unsigned POST to #{inbox_url}). " <>
+          "Run mix hybridsocial.gen.instance_keys."
+      )
 
-    case HTTPoison.post(inbox_url, body, headers, recv_timeout: 15_000, timeout: 15_000) do
-      {:ok, %{status_code: status}} when status in 200..299 ->
-        {:ok, status}
-
-      {:ok, %{status_code: status, body: resp_body}} ->
-        {:error, "HTTP #{status}: #{String.slice(resp_body, 0, 500)}"}
-
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        {:error, "Connection error: #{inspect(reason)}"}
+      {:error, "instance_keys_unconfigured"}
     end
   end
 
@@ -355,9 +366,10 @@ defmodule Hybridsocial.Federation.Publisher do
   end
 
   defp fetch_actor_inbox_from_remote(actor_url) do
-    headers = [{"Accept", "application/activity+json, application/ld+json"}]
-
-    case HTTPoison.get(actor_url, headers, follow_redirect: true, timeout: 10_000) do
+    case Hybridsocial.Federation.SignedFetch.get(actor_url,
+           follow_redirect: true,
+           timeout: 10_000
+         ) do
       {:ok, %{status_code: 200, body: body}} ->
         case Jason.decode(body) do
           {:ok, %{"inbox" => inbox}} when is_binary(inbox) -> inbox

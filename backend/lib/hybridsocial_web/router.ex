@@ -24,6 +24,17 @@ defmodule HybridsocialWeb.Router do
     plug HybridsocialWeb.Plugs.RateLimiter
   end
 
+  # Federation traffic (actor JSON, webfinger, inbox, dereferenceable objects)
+  # uses its own rate-limiter with a much higher ceiling and an isolated
+  # Valkey namespace. Sharing the browser-anonymous bucket starved legitimate
+  # remote peers and surfaced as "Unable to fetch key JSON" / "Invalid HTTP
+  # Signature" errors on outgoing Follows.
+  pipeline :federation do
+    plug :accepts, ["json", "activity+json", "ld+json"]
+    plug HybridsocialWeb.Plugs.IpBan
+    plug HybridsocialWeb.Plugs.FederationRateLimiter
+  end
+
   pipeline :admin do
     plug HybridsocialWeb.Plugs.Auth
     plug HybridsocialWeb.Plugs.RequireAuth
@@ -460,6 +471,7 @@ defmodule HybridsocialWeb.Router do
     get "/user", StreamingController, :user
     get "/list/:id", StreamingController, :list
     get "/group/:id", StreamingController, :group
+    get "/post/:id", StreamingController, :post
   end
 
   # SSE Streaming (optional auth)
@@ -771,7 +783,11 @@ defmodule HybridsocialWeb.Router do
     # Dead-letter queue: failed deliveries with retry/drop actions.
     get "/federation/dead_letters", AdminController, :federation_dead_letters
     post "/federation/dead_letters/:id/retry", AdminController, :federation_retry_dead_letter
-    post "/federation/dead_letters/retry_domain", AdminController, :federation_retry_dead_letters_for_domain
+
+    post "/federation/dead_letters/retry_domain",
+         AdminController,
+         :federation_retry_dead_letters_for_domain
+
     delete "/federation/dead_letters/:id", AdminController, :federation_drop_dead_letter
 
     # Promotions management
@@ -977,7 +993,7 @@ defmodule HybridsocialWeb.Router do
   # --- Federation / ActivityPub ---
 
   scope "/.well-known", HybridsocialWeb.Federation do
-    pipe_through :api
+    pipe_through :federation
 
     get "/webfinger", WebfingerController, :show
     get "/nodeinfo", NodeinfoController, :well_known
@@ -993,20 +1009,20 @@ defmodule HybridsocialWeb.Router do
 
   # NodeInfo
   scope "/nodeinfo", HybridsocialWeb.Federation do
-    pipe_through :api
+    pipe_through :federation
 
     get "/2.0", NodeinfoController, :show
   end
 
   # Instance actor (public)
   scope "/", HybridsocialWeb.Federation do
-    pipe_through :api
+    pipe_through :federation
 
     get "/actor", InstanceActorController, :show
   end
 
   scope "/actors", HybridsocialWeb.Federation do
-    pipe_through :api
+    pipe_through :federation
 
     get "/:id", ActorController, :show
     get "/:id/followers", ActorController, :followers
@@ -1017,7 +1033,7 @@ defmodule HybridsocialWeb.Router do
   end
 
   scope "/", HybridsocialWeb.Federation do
-    pipe_through :api
+    pipe_through :federation
 
     post "/inbox", InboxController, :shared_inbox
 

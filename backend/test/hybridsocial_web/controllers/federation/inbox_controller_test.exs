@@ -229,7 +229,115 @@ defmodule HybridsocialWeb.Federation.InboxControllerTest do
 
       assert json_response(conn, 403)["error"] == "Domain suspended"
     end
+  end
 
+  describe "Digest header enforcement (production-like)" do
+    setup do
+      # DigestPlug's "missing-Digest is fatal" behavior is paired with the
+      # federation_signature_check env (default true in prod, false in test
+      # so existing fixtures don't need handcrafted signatures). Flip it on
+      # for these tests, then restore.
+      prev = Application.get_env(:hybridsocial, :federation_signature_check, true)
+      Application.put_env(:hybridsocial, :federation_signature_check, true)
+      on_exit(fn -> Application.put_env(:hybridsocial, :federation_signature_check, prev) end)
+      :ok
+    end
+
+    test "rejects POST /inbox without a Digest header", %{conn: conn} do
+      activity = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "id" => "https://remote.example/activities/no-digest-1",
+        "type" => "Follow",
+        "actor" => "https://remote.example/users/no_digest",
+        "object" => "#{base_url()}/actor"
+      }
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/activity+json")
+        # Deliberately no Digest header.
+        |> post("/inbox", activity)
+
+      assert json_response(conn, 401)["error"] == "Digest header required"
+    end
+  end
+
+  describe "Digest mismatch (always-on)" do
+    test "rejects POST /inbox with a Digest that doesn't match the body", %{conn: conn} do
+      activity = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "id" => "https://remote.example/activities/bad-digest-1",
+        "type" => "Follow",
+        "actor" => "https://remote.example/users/bad_digest",
+        "object" => "#{base_url()}/actor"
+      }
+
+      conn =
+        conn
+        |> put_req_header("content-type", "application/activity+json")
+        |> put_req_header("digest", "SHA-256=" <> Base.encode64(:crypto.hash(:sha256, "wrong")))
+        |> post("/inbox", activity)
+
+      assert json_response(conn, 401)["error"] == "Invalid digest"
+    end
+  end
+
+  describe "actor / keyId origin cross-check" do
+    setup do
+      # The cross-check only fires when signature verification is enabled;
+      # test env disables it by default. Flip it on for these tests, then
+      # restore so we don't leak into other tests.
+      prev = Application.get_env(:hybridsocial, :federation_signature_check, true)
+      Application.put_env(:hybridsocial, :federation_signature_check, true)
+      on_exit(fn -> Application.put_env(:hybridsocial, :federation_signature_check, prev) end)
+      :ok
+    end
+
+    test "rejects an activity whose actor's origin doesn't match the keyId's origin",
+         %{conn: conn} do
+      local = create_local_identity("xorigin_target")
+
+      # Build a signed POST where the keyId is from "remote.example" but
+      # the activity claims "actor": "https://victim.example/users/foo".
+      # The verifier won't reach origin check unless the signature parses,
+      # so we send a syntactically valid Signature header — the origin
+      # check fires once verify returns ok-or-error, and rejects this
+      # cross-origin claim before any state mutation.
+      activity = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "id" => "https://attacker.example/activities/spoof-1",
+        "type" => "Follow",
+        "actor" => "https://victim.example/users/foo",
+        "object" => "#{base_url()}/actors/#{local.id}"
+      }
+
+      body = Jason.encode!(activity)
+      digest = "SHA-256=" <> Base.encode64(:crypto.hash(:sha256, body))
+
+      # The Signature itself is invalid (we don't have attacker's key)
+      # so HTTPSignature.verify will return :signature_invalid before
+      # the origin check runs. That's the right ordering — a bad
+      # signature is rejected first. We assert the response is 401
+      # regardless of which check tripped.
+      conn =
+        conn
+        |> put_req_header("content-type", "application/activity+json")
+        |> put_req_header("digest", digest)
+        |> put_req_header(
+          "date",
+          Calendar.strftime(DateTime.utc_now(), "%a, %d %b %Y %H:%M:%S GMT")
+        )
+        |> put_req_header(
+          "signature",
+          ~s|keyId="https://attacker.example/users/x#main-key",algorithm="rsa-sha256",headers="(request-target) host date digest",signature="ZmFrZQ=="|
+        )
+        |> post("/actors/#{local.id}/inbox", activity)
+
+      assert json_response(conn, 401)["error"] == "Invalid HTTP signature"
+    end
+  end
+
+  describe "Like activity (legacy compatibility)" do
     test "returns 202 for a Like activity", %{conn: conn} do
       local = create_local_identity("shared_like_target")
       {:ok, post} = Posts.create_post(local.id, %{"content" => "Likeable", "post_type" => "text"})

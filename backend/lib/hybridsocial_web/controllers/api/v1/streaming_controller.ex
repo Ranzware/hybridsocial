@@ -64,6 +64,23 @@ defmodule HybridsocialWeb.Api.V1.StreamingController do
     listen_loop(conn)
   end
 
+  @doc """
+  Streams update events for a single post. Used by the composer to
+  show a live "edited" indicator when the author edits a post the
+  user is currently replying to.
+
+  Subscription is intentionally instance-scoped (authenticated
+  pipeline) — federation peers see updates via Update activities,
+  not this stream.
+  """
+  def post(conn, %{"id" => post_id}) do
+    conn = start_sse(conn)
+
+    Phoenix.PubSub.subscribe(Hybridsocial.PubSub, "post:#{post_id}")
+
+    listen_loop(conn)
+  end
+
   defp start_sse(conn) do
     conn
     |> put_resp_content_type("text/event-stream")

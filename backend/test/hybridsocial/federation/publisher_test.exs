@@ -89,6 +89,28 @@ defmodule Hybridsocial.Federation.PublisherTest do
     end
   end
 
+  describe "deliver/3 — refuses to send unsigned" do
+    test "returns an explicit error when the identity has no private_key" do
+      identity = create_user("nokey1", "nokey1@example.com")
+      # Strip the auto-generated key so we exercise the missing-key branch.
+      {:ok, identity} =
+        identity
+        |> Ecto.Changeset.cast(%{private_key: nil}, [:private_key])
+        |> Hybridsocial.Repo.update()
+
+      activity = %{
+        "@context" => "https://www.w3.org/ns/activitystreams",
+        "type" => "Follow",
+        "id" => "http://localhost:4002/activities/test-no-key",
+        "actor" => "http://localhost:4002/actors/#{identity.id}",
+        "object" => "https://remote.example/users/x"
+      }
+
+      assert {:error, "missing_private_key"} =
+               Publisher.deliver(activity, "https://remote.example/inbox", identity)
+    end
+  end
+
   # --- Helper ---
 
   defp create_user(handle, email) do

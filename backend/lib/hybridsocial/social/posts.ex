@@ -651,6 +651,16 @@ defmodule Hybridsocial.Social.Posts do
 
           Phoenix.PubSub.broadcast(Hybridsocial.PubSub, "posts", {:post_updated, post})
 
+          # Per-post topic, consumed by the composer's live-edit
+          # SSE stream so a user replying to this post sees the
+          # "edited" indicator within seconds instead of on next
+          # refresh.
+          Phoenix.PubSub.broadcast(
+            Hybridsocial.PubSub,
+            "post:#{post.id}",
+            %{event: "edit", payload: %{id: post.id, edited_at: post.edited_at}}
+          )
+
           # Federate Update to the post's new audience, plus removed
           # recipients so their mirror gets the new content (which
           # drops them from the addressing). Mastodon-class peers

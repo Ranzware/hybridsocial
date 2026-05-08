@@ -57,12 +57,7 @@ defmodule Hybridsocial.Federation.ObjectResolver do
   defp fetch_object(url) do
     # SSRF protection
     with :ok <- Hybridsocial.Security.UrlValidator.validate(url) do
-      headers = [
-        {"Accept", "application/activity+json, application/ld+json"},
-        {"User-Agent", "HybridSocial/0.1.0"}
-      ]
-
-      case HTTPoison.get(url, headers,
+      case Hybridsocial.Federation.SignedFetch.get(url,
              follow_redirect: true,
              max_redirect: 3,
              recv_timeout: 15_000,

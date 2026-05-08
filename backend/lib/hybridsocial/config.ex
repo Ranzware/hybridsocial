@@ -57,6 +57,15 @@ defmodule Hybridsocial.Config do
   @doc "Get the rate limit for anonymous users."
   def rate_limit_anonymous, do: get("rate_limit_anonymous", 240)
 
+  # ActivityPub federation traffic (actor JSON, webfinger, inbox, dereferenceable
+  # objects) needs a much higher ceiling than browser-anonymous: a single
+  # remote Mastodon instance may fetch our actor + 5 objects + outbox sample
+  # within seconds while verifying a signed activity. 240/min per IP starves
+  # legitimate fediverse peers and produced "Unable to fetch key JSON" errors
+  # on outgoing Follows. Per-IP key keeps some DoS protection.
+  @doc "Get the rate limit for federation endpoints (per IP, per minute)."
+  def rate_limit_federation, do: get("rate_limit_federation", 1800)
+
   # --- Subaccount limits ---
 
   @doc "Max bot subaccounts per user."

@@ -174,12 +174,7 @@ defmodule Hybridsocial.Federation.Migration do
   end
 
   defp verify_remote_target_also_known_as(target_ap_id, source_actor_url) do
-    headers = [
-      {"Accept", "application/activity+json"},
-      {"User-Agent", "HybridSocial/0.1.0 (federation/migration)"}
-    ]
-
-    case HTTPoison.get(target_ap_id, headers,
+    case Hybridsocial.Federation.SignedFetch.get(target_ap_id,
            timeout: 10_000,
            recv_timeout: 10_000,
            follow_redirect: true,

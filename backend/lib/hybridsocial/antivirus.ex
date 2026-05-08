@@ -45,6 +45,20 @@ defmodule Hybridsocial.Antivirus do
     end
   end
 
+  @doc """
+  Scans a file on disk by streaming its bytes to clamd in chunks.
+  Same return contract as `scan/1`. Used by the media proxy so a
+  large fetched body can be scanned without first holding it all
+  in memory.
+  """
+  def scan_file(path) when is_binary(path) do
+    if enabled?() do
+      do_scan_file(path)
+    else
+      :ok
+    end
+  end
+
   @doc "Returns true when scanning is enabled in instance config."
   def enabled? do
     Config.get("clamav_enabled", false) == true
@@ -77,6 +91,50 @@ defmodule Hybridsocial.Antivirus do
       parse_response(raw)
     else
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp do_scan_file(path) do
+    host = Config.get("clamav_host", "clamav") |> to_charlist()
+    port = Config.get("clamav_port", 3310)
+    timeout = Config.get("clamav_timeout_ms", @default_timeout_ms)
+
+    with {:ok, sock} <-
+           :gen_tcp.connect(host, port, [:binary, active: false, packet: :raw], timeout),
+         {:ok, file} <- File.open(path, [:read, :binary, :raw]) do
+      try do
+        with :ok <- :gen_tcp.send(sock, "zINSTREAM\0"),
+             :ok <- stream_file_chunks(sock, file),
+             :ok <- :gen_tcp.send(sock, <<0::32>>),
+             {:ok, raw} <- recv_response(sock, timeout) do
+          parse_response(raw)
+        end
+      after
+        File.close(file)
+        :gen_tcp.close(sock)
+      end
+    else
+      {:error, reason} ->
+        Logger.error("ClamAV: scan_file #{path} failed: #{inspect(reason)}")
+        {:error, :unreachable}
+    end
+  end
+
+  defp stream_file_chunks(sock, file) do
+    case :file.read(file, @chunk_size) do
+      :eof ->
+        :ok
+
+      {:ok, chunk} ->
+        size = byte_size(chunk)
+
+        case :gen_tcp.send(sock, <<size::32, chunk::binary>>) do
+          :ok -> stream_file_chunks(sock, file)
+          err -> err
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

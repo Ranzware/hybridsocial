@@ -5,6 +5,10 @@ defmodule Hybridsocial.Federation.HTTPSignature do
   """
 
   @signed_headers ["(request-target)", "host", "date", "digest"]
+  # GETs have no body, so no Digest. Mastodon's "secure mode" / authorized-fetch
+  # gates actor + object dereferences behind a signed GET — without it, those
+  # instances return 401 to our profile/object lookups.
+  @signed_headers_get ["(request-target)", "host", "date"]
 
   # Per draft-cavage-http-signatures + Mastodon convention, signed
   # requests must be reasonably fresh. Mastodon rejects with > 12h
@@ -22,7 +26,7 @@ defmodule Hybridsocial.Federation.HTTPSignature do
 
     request_data = %{
       "(request-target)" =>
-        "#{String.downcase(request[:method])} #{URI.parse(request[:url]).path}",
+        "#{String.downcase(request[:method])} #{request_target_path(request[:url])}",
       "host" => host,
       "date" => date,
       "digest" => digest
@@ -40,6 +44,49 @@ defmodule Hybridsocial.Federation.HTTPSignature do
       "Digest" => digest,
       "Host" => host
     }
+  end
+
+  @doc """
+  Signs a GET request (no body, no Digest header) with the given private
+  key. Use for "authorized-fetch" — many Mastodon instances require it
+  for actor + object dereferences. Returns the headers to attach to the
+  outbound HTTPoison.get call.
+  """
+  def sign_get(url, private_key_pem, key_id) do
+    date = Calendar.strftime(DateTime.utc_now(), "%a, %d %b %Y %H:%M:%S GMT")
+    host = URI.parse(url).host
+
+    request_data = %{
+      "(request-target)" => "get #{request_target_path(url)}",
+      "host" => host,
+      "date" => date
+    }
+
+    signing_string = build_signing_string(@signed_headers_get, request_data)
+    signature = create_signature(signing_string, private_key_pem)
+
+    header_value =
+      ~s(keyId="#{key_id}",algorithm="rsa-sha256",headers="#{Enum.join(@signed_headers_get, " ")}",signature="#{signature}")
+
+    %{
+      "Signature" => header_value,
+      "Date" => date,
+      "Host" => host
+    }
+  end
+
+  # Mastodon and friends sign the path including the query string. URI.parse
+  # gives us .path without the query, so reassemble. Empty paths must become
+  # "/" — some peers reject "(request-target): get " with no path.
+  defp request_target_path(url) do
+    uri = URI.parse(url)
+    path = uri.path || "/"
+
+    case uri.query do
+      nil -> path
+      "" -> path
+      q -> "#{path}?#{q}"
+    end
   end
 
   @doc """
@@ -177,6 +224,11 @@ defmodule Hybridsocial.Federation.HTTPSignature do
     if private_host?(host) do
       {:error, :private_host}
     else
+      # INTENTIONALLY UNSIGNED. This fetch retrieves a remote actor's
+      # public key so we can verify their signature. Signing it would
+      # require them to fetch our key to verify, which would (with their
+      # own secure-mode) require them to verify our fetch — and so on.
+      # Key-discovery GETs are unsigned by convention across the fediverse.
       headers = [
         {"Accept", "application/activity+json"}
       ]
@@ -215,7 +267,18 @@ defmodule Hybridsocial.Federation.HTTPSignature do
       headers_to_verify
       |> Enum.map(fn
         "(request-target)" ->
-          {"(request-target)", "#{String.downcase(to_string(conn.method))} #{conn.request_path}"}
+          # Match what the signer put into (request-target): the path with
+          # query string preserved. Phoenix exposes them separately so we
+          # rejoin here. Inbox POSTs never carry queries, but signed GETs
+          # against /actors/:id/outbox?page=1 etc. do.
+          target_path =
+            case conn.query_string do
+              "" -> conn.request_path
+              nil -> conn.request_path
+              q -> "#{conn.request_path}?#{q}"
+            end
+
+          {"(request-target)", "#{String.downcase(to_string(conn.method))} #{target_path}"}
 
         header ->
           value =

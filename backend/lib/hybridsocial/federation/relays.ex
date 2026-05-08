@@ -78,9 +78,11 @@ defmodule Hybridsocial.Federation.Relays do
   # Mastodon-style on any network / parsing failure so a typo'd URL
   # still gets a meaningful Follow attempt the admin can see fail.
   defp classify_relay(url) do
-    headers = [{"Accept", "application/activity+json"}]
-
-    case HTTPoison.get(url, headers, recv_timeout: 10_000, timeout: 10_000, follow_redirect: true) do
+    case Hybridsocial.Federation.SignedFetch.get(url,
+           recv_timeout: 10_000,
+           timeout: 10_000,
+           follow_redirect: true
+         ) do
       {:ok, %{status_code: status, body: body}} when status in 200..299 ->
         case Jason.decode(body) do
           {:ok, %{"inbox" => inbox} = actor}

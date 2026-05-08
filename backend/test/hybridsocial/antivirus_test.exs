@@ -69,6 +69,54 @@ defmodule Hybridsocial.AntivirusTest do
     end
   end
 
+  describe "scan_file/1" do
+    test "returns :ok without contacting any daemon when disabled" do
+      Config.set("clamav_enabled", false)
+      tmp = write_tmp("anything")
+      assert :ok = Antivirus.scan_file(tmp)
+      File.rm(tmp)
+    end
+
+    test "streams a file's bytes to clamd and reports clean" do
+      port = start_fake_clamd(fn _binary -> "stream: OK" end)
+      Config.set("clamav_enabled", true)
+      Config.set("clamav_host", "127.0.0.1")
+      Config.set("clamav_port", port)
+
+      tmp = write_tmp("clean payload")
+      assert :ok = Antivirus.scan_file(tmp)
+      File.rm(tmp)
+    end
+
+    test "reports infection when the daemon flags a signature" do
+      port = start_fake_clamd(fn _binary -> "stream: Win.Test.EICAR_HDB-1 FOUND" end)
+      Config.set("clamav_enabled", true)
+      Config.set("clamav_host", "127.0.0.1")
+      Config.set("clamav_port", port)
+
+      tmp = write_tmp("eicar")
+      assert {:error, {:infected, "Win.Test.EICAR_HDB-1"}} = Antivirus.scan_file(tmp)
+      File.rm(tmp)
+    end
+
+    test "reassembles a multi-chunk file payload correctly" do
+      port =
+        start_fake_clamd(fn binary ->
+          if byte_size(binary) == 200 * 1024,
+            do: "stream: OK",
+            else: "stream: SizeMismatch FOUND"
+        end)
+
+      Config.set("clamav_enabled", true)
+      Config.set("clamav_host", "127.0.0.1")
+      Config.set("clamav_port", port)
+
+      tmp = write_tmp(:binary.copy(<<"x">>, 200 * 1024))
+      assert :ok = Antivirus.scan_file(tmp)
+      File.rm(tmp)
+    end
+  end
+
   describe "scan/1 with multi-chunk payloads" do
     setup do
       # 200KB → multiple INSTREAM chunks of 64KB
@@ -93,6 +141,13 @@ defmodule Hybridsocial.AntivirusTest do
       payload = :binary.copy(<<"x">>, 200 * 1024)
       assert :ok = Antivirus.scan(payload)
     end
+  end
+
+  defp write_tmp(content) do
+    name = Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+    path = Path.join(System.tmp_dir!(), "av_scan_test_#{name}")
+    File.write!(path, content)
+    path
   end
 
   # ---- Fake clamd helpers ------------------------------------------------
