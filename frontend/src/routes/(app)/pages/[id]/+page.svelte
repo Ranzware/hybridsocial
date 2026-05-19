@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation';
   import { getPage } from '$lib/api/pages.js';
   import PageManageModal from '$lib/components/page/PageManageModal.svelte';
+  import ComposerTrigger from '$lib/components/post/ComposerTrigger.svelte';
   import { api } from '$lib/api/client.js';
   import { currentUser, isStaffMember } from '$lib/stores/auth.js';
   import type { Post } from '$lib/api/types.js';
@@ -256,22 +257,11 @@
     <div class="page-feed-section">
       <Tabs {tabs} bind:active={activeTab}>
         {#if activeTab === 'posts'}
-          <button
-            type="button"
-            class="scope-compose-btn"
-            onclick={() =>
-              window.dispatchEvent(
-                new CustomEvent('open-composer', {
-                  detail: {
-                    pageId: pageData.id,
-                    contextLabel: `Posting to ${pageData.title || pageData.name || 'page'}`,
-                  },
-                }),
-              )}
-          >
-            <span class="material-symbols-outlined">edit</span>
-            New post on this page
-          </button>
+          <ComposerTrigger
+            pageId={pageData.id}
+            contextLabel={`Posting to ${pageData.title || pageData.name || pageData.display_name || 'page'}`}
+            placeholder={`Share something with ${pageData.display_name || pageData.name || pageData.handle || 'this page'}…`}
+          />
           <FeedList
             {posts}
             loading={postsLoading}
@@ -715,26 +705,4 @@
     }
   }
 
-  .scope-compose-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 16px;
-    margin-block-end: var(--space-3);
-    background: var(--color-primary);
-    color: var(--color-text-on-primary);
-    border: 0;
-    border-radius: var(--radius-lg);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .scope-compose-btn:hover {
-    background: var(--color-primary-hover);
-  }
-
-  .scope-compose-btn .material-symbols-outlined {
-    font-size: 18px;
-  }
 </style>
