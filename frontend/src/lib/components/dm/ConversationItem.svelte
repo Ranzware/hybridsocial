@@ -82,13 +82,13 @@
         {:else if conversation.encryption_status === 'at_rest'}
           <span
             class="material-symbols-outlined encryption-icon encryption-at-rest"
-            title="Stored encrypted on our servers. Not end-to-end — the server can decrypt."
+            title="Encrypted on disk. This is not end-to-end ecnryption"
             aria-label="Encrypted at rest"
           >lock</span>
         {:else if conversation.encryption_status === 'federated'}
           <span
             class="material-symbols-outlined encryption-icon encryption-federated"
-            title="Not encrypted — the other server received plaintext. DMs with remote users are not private."
+            title="Not encrypted. DMs with remote users are not private/encrypted"
             aria-label="Not encrypted (federated)"
           >lock_open</span>
         {/if}

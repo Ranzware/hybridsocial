@@ -118,11 +118,24 @@
     if (section === 'invites') void loadInvites();
   });
 
+  // The members + applications endpoints currently return bare arrays
+  // server-side while their TypeScript signatures still say
+  // `PaginatedResponse<T>` — accept either shape so the modal doesn't
+  // explode reading `.data` off an Array. Drop this once the backend
+  // wraps these responses.
+  function unwrap<T>(value: unknown): T[] {
+    if (Array.isArray(value)) return value as T[];
+    if (value && typeof value === 'object' && Array.isArray((value as { data?: T[] }).data)) {
+      return (value as { data: T[] }).data;
+    }
+    return [];
+  }
+
   async function loadMembers() {
     membersLoading = true;
     try {
       const result = await getGroupMembers(groupId);
-      members = result.data;
+      members = unwrap<GroupMember>(result);
     } catch {
       addToast('Failed to load members', 'error');
     } finally {
@@ -134,7 +147,7 @@
     applicationsLoading = true;
     try {
       const result = await getGroupApplications(groupId);
-      applications = result.data;
+      applications = unwrap<GroupApplication>(result);
     } catch {
       addToast('Failed to load applications', 'error');
     } finally {
