@@ -22,6 +22,8 @@ export interface PageInvite {
   page_id: string;
   invited_by: string;
   invited_id: string;
+  invited: PageRoleIdentity | null;
+  inviter: PageRoleIdentity | null;
   status: 'pending' | 'accepted' | 'declined';
   created_at: string;
 }
@@ -88,4 +90,12 @@ export function acceptPageInvite(inviteId: string): Promise<PageInvite> {
 
 export function declinePageInvite(inviteId: string): Promise<PageInvite> {
   return api.post(`/api/v1/pages/invites/${inviteId}/decline`);
+}
+
+export function listPageInvitesSent(pageId: string): Promise<PageInvite[]> {
+  return api.get(`/api/v1/pages/${pageId}/invites`);
+}
+
+export function cancelPageInvite(pageId: string, inviteId: string): Promise<void> {
+  return api.delete(`/api/v1/pages/${pageId}/invites/${inviteId}`);
 }

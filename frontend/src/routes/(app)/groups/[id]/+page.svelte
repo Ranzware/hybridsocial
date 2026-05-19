@@ -5,14 +5,14 @@
   import { get } from 'svelte/store';
   import type { Post } from '$lib/api/types.js';
   import type { GroupDetail, GroupMember } from '$lib/api/groups.js';
-  import { getGroup, getGroupTimeline, getGroupMembers, joinGroup, leaveGroup, updateGroup, deleteGroup, updateMemberRole, banMember } from '$lib/api/groups.js';
+  import { getGroup, getGroupTimeline, getGroupMembers, joinGroup, leaveGroup, updateMemberRole, banMember } from '$lib/api/groups.js';
   import { authStore, isStaffMember } from '$lib/stores/auth.js';
   import GroupHeader from '$lib/components/group/GroupHeader.svelte';
+  import GroupManageModal from '$lib/components/group/GroupManageModal.svelte';
   import Tabs from '$lib/components/ui/Tabs.svelte';
   import FeedList from '$lib/components/feed/FeedList.svelte';
   import Avatar from '$lib/components/ui/Avatar.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
-  import Modal from '$lib/components/ui/Modal.svelte';
   import AdminProfileActions from '$lib/components/admin/AdminProfileActions.svelte';
 
   let group = $state<GroupDetail | null>(null);
@@ -26,16 +26,12 @@
   let activeTab = $state('posts');
   let membersLoaded = $state(false);
 
-  // Admin controls
-  let showEditModal = $state(false);
-  let showDeleteConfirm = $state(false);
+  // Admin controls — the unified manage modal replaces the previous
+  // pair of "Edit Group" / "Delete Group" buttons. All admin actions
+  // (rename, change images, manage members, applications, invites,
+  // delete) live behind one gear icon now.
+  let manageModalOpen = $state(false);
   let showMemberActions = $state<string | null>(null);
-  let editName = $state('');
-  let editDescription = $state('');
-  let editVisibility = $state('public');
-  let editJoinPolicy = $state('open');
-  let saving = $state(false);
-  let deleting = $state(false);
 
   let groupId = $derived(page.params.id!);
   let currentUserId = $derived(get(authStore)?.user?.id);
@@ -121,41 +117,6 @@
     } catch {}
   }
 
-  // --- Admin: Edit Group ---
-  function openEdit() {
-    if (!group) return;
-    editName = group.name;
-    editDescription = group.description || '';
-    editVisibility = group.visibility || 'public';
-    editJoinPolicy = group.join_policy || 'open';
-    showEditModal = true;
-  }
-
-  async function saveEdit() {
-    saving = true;
-    try {
-      const updated = await updateGroup(groupId, {
-        name: editName,
-        description: editDescription,
-        visibility: editVisibility as 'public' | 'private' | 'secret',
-        join_policy: editJoinPolicy as 'open' | 'approval' | 'invite'
-      });
-      group = { ...group, ...updated };
-      showEditModal = false;
-    } catch {}
-    saving = false;
-  }
-
-  // --- Admin: Delete Group ---
-  async function confirmDeleteGroup() {
-    deleting = true;
-    try {
-      await deleteGroup(groupId);
-      goto('/groups');
-    } catch {}
-    deleting = false;
-  }
-
   // --- Admin: Member Management ---
   async function handleChangeRole(memberId: string, newRole: string) {
     try {
@@ -178,7 +139,7 @@
   }
 
   function openSettings() {
-    goto(`/groups/${groupId}/settings`);
+    manageModalOpen = true;
   }
 
   function roleBadge(role: string): string {
@@ -211,19 +172,6 @@
         {/if}
       {/snippet}
     </GroupHeader>
-
-    {#if isAdmin || $isStaffMember}
-      <div class="admin-bar">
-        <button type="button" class="btn btn-outline btn-sm" onclick={openEdit}>
-          Edit Group
-        </button>
-        {#if isOwner || $isStaffMember}
-          <button type="button" class="btn btn-outline btn-sm btn-danger-outline" onclick={() => showDeleteConfirm = true}>
-            Delete Group
-          </button>
-        {/if}
-      </div>
-    {/if}
 
     <div class="group-content">
       <Tabs {tabs} bind:active={activeTab}>
@@ -358,66 +306,12 @@
   {/if}
 </div>
 
-<!-- Edit Group Modal -->
-{#if showEditModal}
-  <div class="modal-overlay" onclick={() => showEditModal = false}>
-    <div class="modal-dialog" onclick={(e) => e.stopPropagation()}>
-      <h2 class="modal-title">Edit Group</h2>
-
-      <div class="form-group">
-        <label class="form-label" for="edit-name">Name</label>
-        <input id="edit-name" type="text" class="input" bind:value={editName} />
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="edit-desc">Description</label>
-        <textarea id="edit-desc" class="textarea" rows="4" bind:value={editDescription}></textarea>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="edit-vis">Visibility</label>
-        <select id="edit-vis" class="input" bind:value={editVisibility}>
-          <option value="public">Public</option>
-          <option value="private">Private</option>
-          <option value="local_only">Local Only</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label" for="edit-policy">Join Policy</label>
-        <select id="edit-policy" class="input" bind:value={editJoinPolicy}>
-          <option value="open">Open</option>
-          <option value="screening">Screening</option>
-          <option value="approval">Approval Required</option>
-          <option value="invite_only">Invite Only</option>
-        </select>
-      </div>
-
-      <div class="modal-actions">
-        <button type="button" class="btn btn-outline" onclick={() => showEditModal = false}>Cancel</button>
-        <button type="button" class="btn btn-primary" onclick={saveEdit} disabled={saving || !editName.trim()}>
-          {saving ? 'Saving...' : 'Save Changes'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- Delete Confirmation -->
-{#if showDeleteConfirm}
-  <div class="modal-overlay" onclick={() => showDeleteConfirm = false}>
-    <div class="modal-dialog" onclick={(e) => e.stopPropagation()}>
-      <h2 class="modal-title">Delete Group?</h2>
-      <p class="modal-message">This will permanently delete <strong>{group?.name}</strong> and all its content. This action cannot be undone.</p>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-outline" onclick={() => showDeleteConfirm = false}>Cancel</button>
-        <button type="button" class="btn btn-danger" onclick={confirmDeleteGroup} disabled={deleting}>
-          {deleting ? 'Deleting...' : 'Delete Group'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<GroupManageModal
+  bind:open={manageModalOpen}
+  bind:group
+  isStaff={$isStaffMember}
+  ondeleted={() => goto('/groups')}
+/>
 
 <style>
   .group-detail-page {

@@ -370,6 +370,46 @@ defmodule Hybridsocial.Pages do
     |> Repo.preload([:page, :inviter])
   end
 
+  @doc """
+  Lists pending invites *for* a page so its admins can audit who's been
+  invited and revoke anything that hasn't been accepted yet. Returns
+  `{:error, :forbidden}` if the viewer isn't a page admin.
+  """
+  def list_invites_for_page(page_identity_id, viewer_id) do
+    if can_manage?(page_identity_id, viewer_id) do
+      invites =
+        PageInvite
+        |> where([i], i.page_id == ^page_identity_id and i.status == "pending")
+        |> order_by([i], desc: i.inserted_at)
+        |> Repo.all()
+        |> Repo.preload([:invited, :inviter])
+
+      {:ok, invites}
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  @doc """
+  Cancel a still-pending page invite. The original inviter or any
+  page admin/owner can revoke; declined / accepted invites no-op with
+  `:not_pending`.
+  """
+  def cancel_page_invite(invite_id, viewer_id) do
+    with {:ok, invite} <- get_page_invite(invite_id) do
+      cond do
+        invite.status != "pending" ->
+          {:error, :not_pending}
+
+        invite.invited_by == viewer_id or can_manage?(invite.page_id, viewer_id) ->
+          Repo.delete(invite)
+
+        true ->
+          {:error, :forbidden}
+      end
+    end
+  end
+
   defp get_page_invite(id) do
     case Repo.get(PageInvite, id) do
       nil -> {:error, :not_found}

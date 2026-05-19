@@ -6,12 +6,19 @@
     open = $bindable(false),
     title = '',
     onclose,
-    children
+    children,
+    // `sm` (480px) is the historical default. `lg` (900px) is for
+    // management UIs that fit a sidebar + content layout — anything
+    // wider than that and the dialog stops feeling like a dialog and
+    // starts feeling like a page, so we cap there. `full` lets a
+    // caller stretch to the viewport when needed.
+    size = 'sm',
   }: {
     open?: boolean;
     title?: string;
     onclose?: () => void;
     children?: Snippet;
+    size?: 'sm' | 'md' | 'lg' | 'full';
   } = $props();
 
   let dialogEl: HTMLDivElement | undefined = $state();
@@ -75,7 +82,11 @@
     onkeydown={handleKeydown}
     onclick={handleBackdropClick}
   >
-    <div class="modal" bind:this={dialogEl} transition:fly={{ y: 20, duration: 200 }}>
+    <div
+      class="modal modal-{size}"
+      bind:this={dialogEl}
+      transition:fly={{ y: 20, duration: 200 }}
+    >
       <div class="modal-header">
         <h2 class="modal-title">{title}</h2>
         <button class="modal-close" onclick={close} aria-label="Close dialog" type="button">
@@ -110,12 +121,16 @@
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     width: 100%;
-    max-width: 480px;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
+
+  .modal-sm { max-width: 480px; }
+  .modal-md { max-width: 640px; }
+  .modal-lg { max-width: 900px; }
+  .modal-full { max-width: min(1100px, 96vw); max-height: 92vh; }
 
   .modal-header {
     display: flex;

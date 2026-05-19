@@ -210,6 +210,44 @@ defmodule HybridsocialWeb.Api.V1.GroupController do
     end
   end
 
+  # GET /api/v1/groups/:id/invites — pending invites the admins sent.
+  def list_invites(conn, %{"id" => id}) do
+    identity = conn.assigns.current_identity
+
+    case Groups.list_pending_invites(id, identity.id) do
+      {:ok, invites} ->
+        conn
+        |> put_status(:ok)
+        |> json(Enum.map(invites, &serialize_invite/1))
+
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{error: "group.forbidden"})
+
+      {:error, :not_found} ->
+        conn |> put_status(:not_found) |> json(%{error: "group.not_found"})
+    end
+  end
+
+  # DELETE /api/v1/groups/:id/invites/:invite_id — admins (or the original
+  # inviter) revoke an invite that hasn't been accepted yet.
+  def cancel_invite(conn, %{"invite_id" => invite_id}) do
+    identity = conn.assigns.current_identity
+
+    case Groups.cancel_invite(invite_id, identity.id) do
+      {:ok, _invite} ->
+        send_resp(conn, :no_content, "")
+
+      {:error, :not_found} ->
+        conn |> put_status(:not_found) |> json(%{error: "invite.not_found"})
+
+      {:error, :not_pending} ->
+        conn |> put_status(:conflict) |> json(%{error: "invite.not_pending"})
+
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{error: "invite.forbidden"})
+    end
+  end
+
   # GET /api/v1/groups/:id/applications
   def applications(conn, %{"id" => id}) do
     applications = Groups.get_applications(id)
@@ -468,9 +506,18 @@ defmodule HybridsocialWeb.Api.V1.GroupController do
       group_id: invite.group_id,
       invited_by: invite.invited_by,
       invited_id: invite.invited_id,
+      invited: invite_identity(invite, :invited),
+      inviter: invite_identity(invite, :inviter),
       status: invite.status,
       created_at: invite.inserted_at
     }
+  end
+
+  defp invite_identity(invite, assoc) do
+    case Map.get(invite, assoc) do
+      %Hybridsocial.Accounts.Identity{} = identity -> serialize_actor_identity(identity)
+      _ -> nil
+    end
   end
 
   defp serialize_screening_config(config) do

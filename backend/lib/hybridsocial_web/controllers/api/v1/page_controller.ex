@@ -386,15 +386,64 @@ defmodule HybridsocialWeb.Api.V1.PageController do
     end
   end
 
+  @doc "GET /api/v1/pages/:id/invites — pending invites the page sent."
+  def list_invites_for_page(conn, %{"id" => id}) do
+    identity = conn.assigns.current_identity
+
+    case Pages.list_invites_for_page(id, identity.id) do
+      {:ok, invites} ->
+        json(conn, Enum.map(invites, &serialize_invite/1))
+
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{error: "page.forbidden"})
+    end
+  end
+
+  @doc "DELETE /api/v1/pages/:id/invites/:invite_id — admins (or the original inviter) revoke an invite."
+  def cancel_invite(conn, %{"invite_id" => invite_id}) do
+    identity = conn.assigns.current_identity
+
+    case Pages.cancel_page_invite(invite_id, identity.id) do
+      {:ok, _invite} ->
+        send_resp(conn, :no_content, "")
+
+      {:error, :not_found} ->
+        conn |> put_status(:not_found) |> json(%{error: "invite.not_found"})
+
+      {:error, :not_pending} ->
+        conn |> put_status(:conflict) |> json(%{error: "invite.not_pending"})
+
+      {:error, :forbidden} ->
+        conn |> put_status(:forbidden) |> json(%{error: "invite.forbidden"})
+    end
+  end
+
   defp serialize_invite(invite) do
     %{
       id: invite.id,
       page_id: invite.page_id,
       invited_by: invite.invited_by,
       invited_id: invite.invited_id,
+      invited: invite_identity(invite, :invited),
+      inviter: invite_identity(invite, :inviter),
       status: invite.status,
       created_at: invite.inserted_at
     }
+  end
+
+  defp invite_identity(invite, assoc) do
+    case Map.get(invite, assoc) do
+      %Hybridsocial.Accounts.Identity{} = identity ->
+        %{
+          id: identity.id,
+          handle: identity.handle,
+          display_name: identity.display_name,
+          avatar_url: identity.avatar_url
+        }
+
+      _ ->
+        nil
+    end
   end
 
   # ---------------------------------------------------------------------------

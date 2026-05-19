@@ -390,6 +390,8 @@ defmodule HybridsocialWeb.Router do
     post "/:id/leave", GroupController, :leave
     get "/:id/members", GroupController, :members
     post "/:id/invite", GroupController, :invite
+    get "/:id/invites", GroupController, :list_invites
+    delete "/:id/invites/:invite_id", GroupController, :cancel_invite
 
     get "/:id/applications", GroupController, :applications
     post "/:id/applications/:aid/approve", GroupController, :approve_application
@@ -421,6 +423,8 @@ defmodule HybridsocialWeb.Router do
     # Manager invites (mirror of /groups/:id/invite flow).
     get "/invites", PageController, :my_invites
     post "/:id/invite", PageController, :invite
+    get "/:id/invites", PageController, :list_invites_for_page
+    delete "/:id/invites/:invite_id", PageController, :cancel_invite
     post "/invites/:invite_id/accept", PageController, :accept_invite
     post "/invites/:invite_id/decline", PageController, :decline_invite
   end

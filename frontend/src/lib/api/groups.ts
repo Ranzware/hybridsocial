@@ -27,12 +27,25 @@ export interface GroupSettings {
   description?: string;
   visibility?: 'public' | 'private' | 'secret';
   join_policy?: 'open' | 'approval' | 'invite';
+  avatar_url?: string | null;
+  header_url?: string | null;
   rules?: string[];
   screening?: {
     questions?: string[];
     min_account_age_days?: number;
     require_profile_image?: boolean;
   };
+}
+
+export interface GroupInvite {
+  id: string;
+  group_id: string;
+  invited_by: string;
+  invited_id: string;
+  invited: Identity | null;
+  inviter: Identity | null;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
 }
 
 export function getGroups(filter: 'member' | 'discover' = 'member', cursor?: string): Promise<PaginatedResponse<Group>> {
@@ -104,6 +117,14 @@ export function inviteToGroup(groupId: string, accountId: string): Promise<void>
   // sending `account_id` made every invite fail validation silently
   // since the changeset's validate_required([:invited_id]) kicked in.
   return api.post(`/api/v1/groups/${groupId}/invite`, { invited_id: accountId });
+}
+
+export function listGroupInvites(groupId: string): Promise<GroupInvite[]> {
+  return api.get(`/api/v1/groups/${groupId}/invites`);
+}
+
+export function cancelGroupInvite(groupId: string, inviteId: string): Promise<void> {
+  return api.delete(`/api/v1/groups/${groupId}/invites/${inviteId}`);
 }
 
 export function updateMemberRole(groupId: string, accountId: string, role: string): Promise<void> {

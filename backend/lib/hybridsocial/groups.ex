@@ -552,6 +552,46 @@ defmodule Hybridsocial.Groups do
     |> Repo.all()
   end
 
+  @doc """
+  Pending invites for a group, surfaced to the admins so they can see
+  who's been invited and cancel anything that hasn't been accepted yet.
+  Requires the viewer to be an admin/owner of the group.
+  """
+  def list_pending_invites(group_id, viewer_id) do
+    with {:ok, _role} <- require_role(group_id, viewer_id, @manage_roles) do
+      invites =
+        GroupInvite
+        |> where([i], i.group_id == ^group_id and i.status == "pending")
+        |> order_by([i], desc: i.inserted_at)
+        |> preload([:invited, :inviter])
+        |> Repo.all()
+
+      {:ok, invites}
+    end
+  end
+
+  @doc """
+  Cancel a still-pending invite. Either the original inviter or any
+  admin/owner of the group may cancel — keeps "I sent that by mistake"
+  recoverable without forcing the inviter to be online.
+  """
+  def cancel_invite(invite_id, viewer_id) do
+    case Repo.get(GroupInvite, invite_id) do
+      nil ->
+        {:error, :not_found}
+
+      %GroupInvite{status: status} when status != "pending" ->
+        {:error, :not_pending}
+
+      invite ->
+        if invite.invited_by == viewer_id or can_manage?(invite.group_id, viewer_id) do
+          Repo.delete(invite)
+        else
+          {:error, :forbidden}
+        end
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------

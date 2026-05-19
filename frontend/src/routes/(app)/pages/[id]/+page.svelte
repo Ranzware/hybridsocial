@@ -2,7 +2,8 @@
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { getPage, updatePage, deletePage } from '$lib/api/pages.js';
+  import { getPage } from '$lib/api/pages.js';
+  import PageManageModal from '$lib/components/page/PageManageModal.svelte';
   import { api } from '$lib/api/client.js';
   import { currentUser, isStaffMember } from '$lib/stores/auth.js';
   import type { Post } from '$lib/api/types.js';
@@ -34,68 +35,21 @@
       pageData.organization?.owner_id === $currentUser.id,
   );
 
-  // Edit dialog state
-  let showEditDialog = $state(false);
-  let editForm = $state({
-    display_name: '',
-    bio: '',
-    avatar_url: '',
-    header_url: '',
-    website: '',
-    category: '',
-  });
-  let editSaving = $state(false);
-  let editError = $state('');
+  // The old Edit / Manage / Delete trio is collapsed into one icon
+  // that opens PageManageModal. All editing, role grants, invites,
+  // and the delete confirmation live inside the modal now.
+  let manageModalOpen = $state(false);
 
-  // Delete confirm
-  let showDeleteConfirm = $state(false);
-  let deleting = $state(false);
-
-  function openEditDialog() {
-    if (!pageData) return;
-    editForm = {
-      display_name: pageData.display_name || '',
-      bio: pageData.bio || '',
-      avatar_url: pageData.avatar_url || '',
-      header_url: pageData.header_url || '',
-      website: pageData.organization?.website || pageData.website || '',
-      category: pageData.organization?.category || pageData.category || '',
-    };
-    editError = '';
-    showEditDialog = true;
-  }
-
-  async function saveEdit() {
-    editSaving = true;
-    editError = '';
-    try {
-      const updated = await updatePage(pageId, {
-        display_name: editForm.display_name.trim() || null,
-        bio: editForm.bio.trim() || null,
-        avatar_url: editForm.avatar_url.trim() || null,
-        header_url: editForm.header_url.trim() || null,
-        website: editForm.website.trim() || null,
-        category: editForm.category.trim() || null,
-      });
-      pageData = { ...pageData, ...updated };
-      showEditDialog = false;
-    } catch (e: any) {
-      editError = e?.body?.message || 'Failed to save page changes.';
-    } finally {
-      editSaving = false;
-    }
-  }
-
-  async function confirmDelete() {
-    deleting = true;
-    try {
-      await deletePage(pageId);
-      goto('/pages');
-    } catch {
-      deleting = false;
-      showDeleteConfirm = false;
-    }
-  }
+  // Anyone with at least a manager-tier role (owner / admin) on the
+  // page — plus instance staff — can pull up the management modal.
+  // The modal itself further gates Danger Zone (delete) to owners
+  // and staff.
+  let canManage = $derived(
+    isOwner ||
+      $isStaffMember ||
+      (typeof pageData?.viewer_role === 'string' &&
+        ['admin', 'editor', 'moderator'].includes(pageData.viewer_role)),
+  );
 
   const tabs = [
     { id: 'posts', label: 'Posts' },
@@ -200,36 +154,24 @@
             {#if $isStaffMember && !isOwner && pageData}
               <AdminProfileActions account={pageData} />
             {/if}
-            {#if isOwner || ($isStaffMember && pageData)}
-              <button type="button" class="btn btn-outline" onclick={openEditDialog}>
-                Edit page
-              </button>
-              <a class="btn btn-outline" href={`/pages/${pageId}/settings`}>
-                Manage
-              </a>
+            {#if canManage}
+              <!-- One settings icon replaces the old Edit / Manage /
+                   Delete trio. Everything an admin used to do across
+                   those three buttons now lives in PageManageModal. -->
               <button
                 type="button"
-                class="btn btn-outline btn-danger-outline"
-                onclick={() => (showDeleteConfirm = true)}
+                class="btn btn-ghost icon-btn"
+                onclick={() => (manageModalOpen = true)}
+                aria-label="Manage page"
+                title="Manage page"
               >
-                Delete
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
               </button>
-            {:else if pageData?.viewer_role && pageData.viewer_role !== null}
-              <!-- Non-owners with admin/editor/moderator role on the
-                   page see the Manage button (no Edit/Delete which
-                   only the org owner can do). -->
-              <a class="btn btn-outline" href={`/pages/${pageId}/settings`}>
-                Manage
-              </a>
-              <button
-                type="button"
-                class="btn {isFollowing ? 'btn-outline' : 'btn-primary'}"
-                onclick={toggleFollow}
-                disabled={followLoading}
-              >
-                {isFollowing ? 'Following' : 'Follow'}
-              </button>
-            {:else}
+            {/if}
+            {#if !isOwner}
               <button
                 type="button"
                 class="btn {isFollowing ? 'btn-outline' : 'btn-primary'}"
@@ -364,69 +306,12 @@
   {/if}
 </div>
 
-{#if showEditDialog}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Edit page" onclick={(e) => { if (e.target === e.currentTarget) showEditDialog = false; }}>
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3>Edit page</h3>
-        <button type="button" class="modal-close" onclick={() => (showEditDialog = false)} aria-label="Close">✕</button>
-      </div>
-      <form class="modal-form" onsubmit={(e) => { e.preventDefault(); saveEdit(); }}>
-        <label class="modal-field">
-          <span>Display name</span>
-          <input type="text" bind:value={editForm.display_name} maxlength="50" />
-        </label>
-        <label class="modal-field">
-          <span>Bio</span>
-          <textarea bind:value={editForm.bio} maxlength="500" rows="3" dir="auto"></textarea>
-        </label>
-        <label class="modal-field">
-          <span>Avatar URL</span>
-          <input type="url" bind:value={editForm.avatar_url} maxlength="2048" placeholder="https://…" />
-        </label>
-        <label class="modal-field">
-          <span>Header URL</span>
-          <input type="url" bind:value={editForm.header_url} maxlength="2048" placeholder="https://…" />
-        </label>
-        <label class="modal-field">
-          <span>Website</span>
-          <input type="url" bind:value={editForm.website} placeholder="https://…" />
-        </label>
-        <label class="modal-field">
-          <span>Category</span>
-          <input type="text" bind:value={editForm.category} maxlength="60" placeholder="Business / Tech / Arts / …" />
-        </label>
-        {#if editError}
-          <p class="modal-error">{editError}</p>
-        {/if}
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost" onclick={() => (showEditDialog = false)}>Cancel</button>
-          <button type="submit" class="btn btn-primary" disabled={editSaving}>
-            {editSaving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </form>
-    </div>
-  </div>
-{/if}
-
-{#if showDeleteConfirm}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="Delete page" onclick={(e) => { if (e.target === e.currentTarget) showDeleteConfirm = false; }}>
-    <div class="modal-card modal-card-narrow">
-      <h3 class="modal-title-danger">Delete this page?</h3>
-      <p class="modal-message">
-        This permanently deletes <strong>{pageData?.display_name || pageData?.handle}</strong>
-        and every post made to it. The action cannot be undone.
-      </p>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" onclick={() => (showDeleteConfirm = false)} disabled={deleting}>Cancel</button>
-        <button type="button" class="btn btn-danger" onclick={confirmDelete} disabled={deleting}>
-          {deleting ? 'Deleting…' : 'Delete page'}
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+<PageManageModal
+  bind:open={manageModalOpen}
+  bind:page={pageData}
+  isStaff={$isStaffMember}
+  ondeleted={() => goto('/pages')}
+/>
 
 <style>
   .page-detail {
