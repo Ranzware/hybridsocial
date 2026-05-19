@@ -3,6 +3,9 @@ import { api } from './client.js';
 export interface PageRoleIdentity {
   id: string;
   handle: string;
+  // Webfinger form. The backend serializer always sets this now;
+  // `string | null` keeps older cached payloads parseable.
+  acct?: string | null;
   display_name: string | null;
   avatar_url: string | null;
 }

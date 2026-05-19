@@ -437,6 +437,12 @@ defmodule HybridsocialWeb.Api.V1.PageController do
         %{
           id: identity.id,
           handle: identity.handle,
+          # `acct` is the user-facing webfinger form
+          # (`user@domain` for remote, bare `user` for local). The
+          # invite UI shows it so an admin inviting `alice@some.host`
+          # sees that, not the sanitized internal handle like
+          # `alice_some_1dd0d2`.
+          acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
           display_name: identity.display_name,
           avatar_url: identity.avatar_url
         }
@@ -560,6 +566,7 @@ defmodule HybridsocialWeb.Api.V1.PageController do
     %{
       id: identity.id,
       handle: identity.handle,
+      acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
       display_name: identity.display_name,
       avatar_url: identity.avatar_url
     }

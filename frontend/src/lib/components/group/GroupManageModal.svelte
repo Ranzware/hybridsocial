@@ -22,7 +22,7 @@
   } from '$lib/api/groups.js';
   import { search } from '$lib/api/search.js';
   import { uploadMedia } from '$lib/api/media.js';
-  import type { Identity } from '$lib/api/types.js';
+  import { displayAcct, type Identity } from '$lib/api/types.js';
 
   let {
     open = $bindable(false),
@@ -278,7 +278,7 @@
       await inviteToGroup(groupId, account.id);
       // Drop from results so the user can't accidentally re-send.
       inviteResults = inviteResults.filter((a) => a.id !== account.id);
-      addToast(`Invited @${account.handle}`, 'success');
+      addToast(`Invited @${displayAcct(account)}`, 'success');
       // Refresh the pending list so the new invite shows up.
       void loadInvites();
     } catch (err: unknown) {
@@ -497,7 +497,7 @@
                   <span class="people-name">
                     {m.account.display_name || m.account.handle}
                   </span>
-                  <span class="people-handle">@{m.account.handle}</span>
+                  <span class="people-handle">@{displayAcct(m.account)}</span>
                 </div>
                 <span class="role-badge role-{m.role}">{roleLabel(m.role)}</span>
                 {#if m.role !== 'owner'}
@@ -544,7 +544,7 @@
                   <Avatar src={a.account.avatar_url} name={a.account.display_name || a.account.handle} size="sm" />
                   <div class="people-meta">
                     <span class="people-name">{a.account.display_name || a.account.handle}</span>
-                    <span class="people-handle">@{a.account.handle}</span>
+                    <span class="people-handle">@{displayAcct(a.account)}</span>
                   </div>
                   <div class="row-actions">
                     <button class="btn btn-sm btn-primary" type="button" onclick={() => handleApprove(a.id)}>
@@ -589,7 +589,7 @@
                 <Avatar src={account.avatar_url} name={account.display_name || account.handle} size="sm" />
                 <div class="people-meta">
                   <span class="people-name">{account.display_name || account.handle}</span>
-                  <span class="people-handle">@{account.handle}</span>
+                  <span class="people-handle">@{displayAcct(account)}</span>
                 </div>
                 <button
                   type="button"
@@ -624,7 +624,7 @@
                     {target?.display_name || target?.handle || 'Invited user'}
                   </span>
                   {#if target?.handle}
-                    <span class="people-handle">@{target.handle}</span>
+                    <span class="people-handle">@{displayAcct(target)}</span>
                   {/if}
                 </div>
                 <button

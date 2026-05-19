@@ -457,6 +457,8 @@ defmodule HybridsocialWeb.Api.V1.GroupController do
     %{
       id: identity.id,
       handle: identity.handle,
+      # See PageController.invite_identity/2 — webfinger form for the UI.
+      acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
       display_name: identity.display_name,
       avatar_url: identity.avatar_url
     }
@@ -489,6 +491,7 @@ defmodule HybridsocialWeb.Api.V1.GroupController do
           do: %{
             id: identity.id,
             handle: identity.handle,
+            acct: HybridsocialWeb.Helpers.Account.build_acct(identity),
             display_name: identity.display_name,
             avatar_url: identity.avatar_url
           }
