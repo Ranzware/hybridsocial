@@ -964,6 +964,56 @@ defmodule Hybridsocial.Messaging do
     end
   end
 
+  @doc """
+  Bump the delivery status of `message_id` for `recipient_id` to "delivered"
+  if it was "sent". Idempotent — never downgrades a "read" row, never
+  errors if the row doesn't exist (the sender's own messages have no row
+  for themselves; remote-imported messages won't either). Broadcasts
+  `chat.delivered` back to the sender so their ticks can flip to two grey.
+  """
+  def mark_delivered(message_id, recipient_id) do
+    now = DateTime.utc_now()
+
+    {updated_count, _} =
+      DeliveryStatus
+      |> where(
+        [d],
+        d.message_id == ^message_id and d.recipient_id == ^recipient_id and d.status == "sent"
+      )
+      |> Repo.update_all(set: [status: "delivered", updated_at: now])
+
+    if updated_count > 0 do
+      broadcast_message_event(message_id, :delivered, %{
+        message_id: message_id,
+        recipient_id: recipient_id,
+        status: "delivered"
+      })
+    end
+
+    {:ok, updated_count}
+  end
+
+  @doc """
+  The lowest delivery state across all recipients of a message. Returns
+  one of "sent" / "delivered" / "read". When no rows exist (e.g. an
+  outbound message with no local recipients yet) returns "sent" — the
+  message was at least accepted by our server.
+  """
+  def lowest_delivery_status(message_id) do
+    statuses =
+      DeliveryStatus
+      |> where([d], d.message_id == ^message_id)
+      |> select([d], d.status)
+      |> Repo.all()
+
+    cond do
+      statuses == [] -> "sent"
+      Enum.any?(statuses, &(&1 == "sent")) -> "sent"
+      Enum.any?(statuses, &(&1 == "delivered")) -> "delivered"
+      true -> "read"
+    end
+  end
+
   @doc "Count unread messages in a conversation for an identity."
   def unread_count(conversation_id, identity_id) do
     participant =
@@ -1322,7 +1372,16 @@ defmodule Hybridsocial.Messaging do
 
   @doc "Broadcast a new message to all conversation participants."
   def broadcast_new_message(message) do
-    message = message |> Repo.preload(:sender) |> decrypt_message()
+    message = message |> Repo.preload([:sender, :media]) |> decrypt_message()
+
+    media_attachments =
+      case message.media do
+        %Hybridsocial.Media.MediaFile{} = m ->
+          [HybridsocialWeb.Serializers.PostSerializer.serialize_media_attachment(m)]
+
+        _ ->
+          []
+      end
 
     broadcast_conversation_event(message.conversation_id, :new_message, %{
       id: message.id,
@@ -1331,6 +1390,10 @@ defmodule Hybridsocial.Messaging do
       content_type: message.content_type,
       reply_to_id: message.reply_to_id,
       sender: HybridsocialWeb.Helpers.Account.serialize_summary(message.sender),
+      media_id: message.media_id,
+      media_attachments: media_attachments,
+      reactions: [],
+      delivery_status: "sent",
       created_at: message.created_at
     })
   end

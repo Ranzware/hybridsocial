@@ -11,16 +11,30 @@
     message,
     isOwn = false,
     showAvatar = true,
+    replyTo = null,
     ondelete,
     onreact,
     onedit,
+    onreply,
+    onreplyclick,
   }: {
     message: Message;
     isOwn?: boolean;
     showAvatar?: boolean;
+    // The message this one is replying to, resolved by the parent (which
+    // owns the full message list). When null we render a faded
+    // "Original message unavailable" stub so a forgotten reply still
+    // shows the quote affordance instead of silently looking like a
+    // normal message.
+    replyTo?: Message | null;
     ondelete?: (messageId: string) => void;
     onreact?: (messageId: string, emoji: string) => void;
     onedit?: (messageId: string, newContent: string) => Promise<void>;
+    // Fired when the user taps "Reply" — parent enters reply-compose mode.
+    onreply?: (message: Message) => void;
+    // Fired when the user taps the quoted preview at the top of a bubble —
+    // parent scrolls to the original message in the thread.
+    onreplyclick?: (messageId: string) => void;
   } = $props();
 
   // Server enforces a 5-minute edit window — mirror it client-side
@@ -49,8 +63,27 @@
     })
   );
 
-  let isRead = $derived(!!message.read_at);
+  // Read receipts: 3-state if the server told us, fall back to the
+  // older 2-state read_at flag for legacy responses that don't include
+  // `delivery_status` yet.
+  let deliveryStatus = $derived(
+    message.delivery_status ?? (message.read_at ? 'read' : 'sent'),
+  );
   let isPending = $derived(!!message.pending);
+
+  // Compact one-line preview of the replied-to message — content
+  // first, falling back to "Attachment" so a reply to a photo with no
+  // caption still gets a recognisable quote chip.
+  let replyPreview = $derived.by(() => {
+    if (!replyTo) return null;
+    const text = (replyTo.content || '').trim();
+    if (text) return text;
+    if ((replyTo.media_attachments || []).length > 0) return 'Attachment';
+    return '';
+  });
+  let replyAuthor = $derived(
+    replyTo?.sender?.display_name || replyTo?.sender?.handle || '',
+  );
   let mediaAttachments = $derived(message.media_attachments || []);
   let reactions = $derived(message.reactions || []);
   let sender = $derived(message.sender || {});
@@ -222,6 +255,25 @@
 
   <div class="bubble-wrapper" class:wrapper-own={isOwn}>
     <div class="bubble" class:bubble-own={isOwn} class:bubble-other={!isOwn}>
+      {#if message.reply_to_id}
+        <button
+          type="button"
+          class="reply-quote"
+          class:reply-quote-clickable={!!onreplyclick && !!replyTo}
+          onclick={() => replyTo && onreplyclick?.(replyTo.id)}
+          disabled={!onreplyclick || !replyTo}
+        >
+          <span class="reply-quote-bar" aria-hidden="true"></span>
+          <span class="reply-quote-body">
+            <span class="reply-quote-author">
+              {replyTo ? replyAuthor || 'Unknown' : 'Original message unavailable'}
+            </span>
+            {#if replyPreview}
+              <span class="reply-quote-text" dir="auto">{replyPreview}</span>
+            {/if}
+          </span>
+        </button>
+      {/if}
       {#if editing}
         <div
           class="edit-shell"
@@ -291,7 +343,25 @@
         {#if isPending}
           <span class="message-pending">sending...</span>
         {:else if isOwn}
-          <span class="read-receipt" class:read={isRead} aria-label={isRead ? 'Read' : 'Sent'}>
+          <span
+            class="read-receipt"
+            class:tick-delivered={deliveryStatus === 'delivered'}
+            class:tick-read={deliveryStatus === 'read'}
+            aria-label={
+              deliveryStatus === 'read'
+                ? 'Read'
+                : deliveryStatus === 'delivered'
+                  ? 'Delivered'
+                  : 'Sent'
+            }
+            title={
+              deliveryStatus === 'read'
+                ? 'Read'
+                : deliveryStatus === 'delivered'
+                  ? 'Delivered'
+                  : 'Sent'
+            }
+          >
             <svg
               width="14"
               height="14"
@@ -302,11 +372,13 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              {#if isRead}
+              {#if deliveryStatus === 'sent'}
+                <!-- single tick -->
+                <polyline points="4 12 8 16 16 8" />
+              {:else}
+                <!-- double tick — colored via .tick-read when seen -->
                 <polyline points="1 12 5 16 12 9" />
                 <polyline points="7 12 11 16 18 9" />
-              {:else}
-                <polyline points="4 12 8 16 16 8" />
               {/if}
             </svg>
           </span>
@@ -372,6 +444,18 @@
             </div>
           {/if}
         </div>
+
+        {#if onreply}
+          <button
+            type="button"
+            class="bubble-action-btn"
+            title="Reply"
+            aria-label="Reply to message"
+            onclick={() => onreply?.(message)}
+          >
+            <span class="material-symbols-outlined">reply</span>
+          </button>
+        {/if}
 
         {#if canEdit}
           <button
@@ -501,6 +585,73 @@
   .bubble-other {
     background: var(--color-surface);
     border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-xs);
+  }
+
+  /* Quoted-reply preview at the top of a bubble. The left bar uses
+     the bubble's own background, so it sits more like an indentation
+     than a separate chip — matches Telegram / Signal / WhatsApp. */
+  .reply-quote {
+    display: flex;
+    gap: var(--space-2);
+    align-items: stretch;
+    width: 100%;
+    margin-block-end: var(--space-1);
+    padding: 4px 8px;
+    border: none;
+    background: var(--color-bg);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    text-align: start;
+    overflow: hidden;
+    /* Click target is a button so screen-reader semantics are right.
+       Reset the default user-agent styles so it visually feels like
+       part of the bubble, not a control. */
+    font: inherit;
+  }
+
+  .reply-quote-clickable {
+    cursor: pointer;
+  }
+
+  .reply-quote-clickable:hover {
+    background: var(--color-surface);
+  }
+
+  .reply-quote:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+
+  .reply-quote-bar {
+    flex-shrink: 0;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--color-primary);
+  }
+
+  .reply-quote-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .reply-quote-author {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .reply-quote-text {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .bubble-actions {
@@ -781,7 +932,13 @@
     align-items: center;
   }
 
-  .read-receipt.read {
+  /* Delivered = 2 ticks, still grey. Read = 2 ticks coloured in the
+     accent — same convention WhatsApp / Telegram use. */
+  .read-receipt.tick-delivered {
+    color: var(--color-text-secondary);
+  }
+
+  .read-receipt.tick-read {
     color: var(--color-primary);
   }
 

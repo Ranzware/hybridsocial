@@ -724,7 +724,7 @@ defmodule HybridsocialWeb.Serializers.PostSerializer do
     |> Map.new()
   end
 
-  defp serialize_media_attachment(%MediaFile{} = media) do
+  def serialize_media_attachment(%MediaFile{} = media) do
     # Remote attachments live on the author's instance. We rewrite
     # the URL through our media proxy so the client never reveals
     # its IP / UA to the remote host. Local uploads keep their

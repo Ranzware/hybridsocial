@@ -2,6 +2,9 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
   use HybridsocialWeb, :controller
 
   alias Hybridsocial.Messaging
+  alias Hybridsocial.Media.MediaFile
+  alias Hybridsocial.Repo
+  alias HybridsocialWeb.Serializers.PostSerializer
   import HybridsocialWeb.Helpers.Pagination, only: [clamp_limit: 1]
 
   # GET /api/v1/conversations
@@ -94,13 +97,26 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
 
     attrs = Map.take(params, ["content", "content_type", "media_id", "reply_to_id"])
 
+    # The frontend sends `media_ids` (array) since the post composer uses
+    # multi-attachment posts. DMs currently only support a single media
+    # per message, so promote the first item if present and the caller
+    # didn't already pass `media_id`.
+    attrs =
+      case Map.get(params, "media_ids") do
+        [first | _] when is_binary(first) and not is_map_key(attrs, "media_id") ->
+          Map.put(attrs, "media_id", first)
+
+        _ ->
+          attrs
+      end
+
     case Messaging.send_message(conversation_id, identity.id, attrs) do
       {:ok, message} ->
-        message = Hybridsocial.Repo.preload(message, [:sender])
+        message = Hybridsocial.Repo.preload(message, [:sender, :media])
 
         conn
         |> put_status(:created)
-        |> json(serialize_message(message))
+        |> json(serialize_message(message, identity.id))
 
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "conversation.not_found"})
@@ -139,7 +155,8 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
 
     case Messaging.get_messages(conversation_id, identity.id, opts) do
       {:ok, messages} ->
-        json(conn, Enum.map(messages, &serialize_message/1))
+        messages = Repo.preload(messages, [:media])
+        json(conn, Enum.map(messages, &serialize_message(&1, identity.id)))
 
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "conversation.not_found"})
@@ -153,8 +170,8 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
 
     case Messaging.edit_message(message_id, identity.id, new_content) do
       {:ok, message} ->
-        message = Hybridsocial.Repo.preload(message, [:sender])
-        json(conn, serialize_message(message))
+        message = Hybridsocial.Repo.preload(message, [:sender, :media])
+        json(conn, serialize_message(message, identity.id))
 
       {:error, :not_found} ->
         conn |> put_status(:not_found) |> json(%{error: "message.not_found"})
@@ -347,7 +364,7 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
     }
   end
 
-  defp serialize_message(message) do
+  defp serialize_message(message, viewer_id) do
     sender =
       case message.sender do
         %Hybridsocial.Accounts.Identity{} = identity ->
@@ -360,6 +377,26 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
     # Get reactions for this message
     reactions = Hybridsocial.Messaging.get_message_reactions(message.id)
 
+    # Single-attachment DMs surfaced as a one-element array so the
+    # frontend can render them with the same component it uses for
+    # multi-attachment posts. When the join-table refactor lands this
+    # turns into a real list without a serializer change.
+    media_attachments =
+      case message.media do
+        %MediaFile{} = m -> [PostSerializer.serialize_media_attachment(m)]
+        _ -> []
+      end
+
+    # Read receipts: tell the sender (only) the lowest delivery state
+    # across all recipients of this message. For a 1:1 DM that's the
+    # single recipient's state; for a group it's the slowest reader.
+    # Hidden from non-senders so the UI never accidentally shows ticks
+    # on someone else's message.
+    delivery_status =
+      if viewer_id && sender && sender[:id] == viewer_id do
+        Messaging.lowest_delivery_status(message.id)
+      end
+
     %{
       id: message.id,
       conversation_id: message.conversation_id,
@@ -367,8 +404,10 @@ defmodule HybridsocialWeb.Api.V1.ConversationController do
       content_type: message.content_type,
       sender: sender,
       media_id: message.media_id,
+      media_attachments: media_attachments,
       reply_to_id: message.reply_to_id,
       reactions: reactions,
+      delivery_status: delivery_status,
       edited_at: message.edited_at,
       created_at: message.created_at
     }

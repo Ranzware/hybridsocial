@@ -6,11 +6,19 @@
   let {
     onsend,
     disabled = false,
-    maxAttachments = 4,
+    // DMs currently store one media per message (single belongs_to on
+    // the Message schema). Until a join-table refactor lands, cap to 1
+    // here so the user doesn't queue four attachments only to silently
+    // lose three on send.
+    maxAttachments = 1,
+    replyingTo = null,
+    oncancelreply,
   }: {
-    onsend?: (content: string, mediaIds: string[]) => void;
+    onsend?: (content: string, mediaIds: string[], replyToId: string | null) => void;
     disabled?: boolean;
     maxAttachments?: number;
+    replyingTo?: import('$lib/api/types.js').Message | null;
+    oncancelreply?: () => void;
   } = $props();
 
   // Same gate as PostComposer — reject types up front so we don't
@@ -101,13 +109,26 @@
   function handleSubmit() {
     const trimmed = content.trim();
     if (!canSend) return;
-    onsend?.(trimmed, uploaded.map((m) => m.id));
+    onsend?.(trimmed, uploaded.map((m) => m.id), replyingTo?.id ?? null);
     content = '';
     uploaded = [];
     if (textareaEl) {
       textareaEl.style.height = 'auto';
     }
   }
+
+  // Compact preview text — falls back to "Attachment" so a reply to a
+  // photo-with-no-caption still shows something meaningful.
+  let replyPreviewText = $derived.by(() => {
+    if (!replyingTo) return '';
+    const text = (replyingTo.content || '').trim();
+    if (text) return text;
+    if ((replyingTo.media_attachments || []).length > 0) return 'Attachment';
+    return '';
+  });
+  let replyAuthor = $derived(
+    replyingTo?.sender?.display_name || replyingTo?.sender?.handle || '',
+  );
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -140,6 +161,28 @@
 </script>
 
 <div class="message-input-bar">
+  {#if replyingTo}
+    <div class="reply-banner" role="status">
+      <span class="reply-banner-bar" aria-hidden="true"></span>
+      <div class="reply-banner-body">
+        <span class="reply-banner-label">Replying to {replyAuthor || 'message'}</span>
+        {#if replyPreviewText}
+          <span class="reply-banner-preview" dir="auto">{replyPreviewText}</span>
+        {/if}
+      </div>
+      <button
+        type="button"
+        class="reply-banner-cancel"
+        onclick={() => oncancelreply?.()}
+        aria-label="Cancel reply"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </button>
+    </div>
+  {/if}
   {#if uploaded.length > 0 || uploadingCount > 0}
     <div class="attachment-row">
       {#each uploaded as m (m.id)}
@@ -356,6 +399,64 @@
 
   .send-btn:disabled {
     cursor: not-allowed;
+  }
+
+  .reply-banner {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-2);
+    padding: 6px 8px;
+    background: var(--color-surface);
+    border-radius: var(--radius-md);
+  }
+
+  .reply-banner-bar {
+    flex-shrink: 0;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--color-primary);
+  }
+
+  .reply-banner-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .reply-banner-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-primary);
+  }
+
+  .reply-banner-preview {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reply-banner-cancel {
+    align-self: flex-start;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    border-radius: var(--radius-full);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .reply-banner-cancel:hover {
+    background: var(--color-bg);
+    color: var(--color-text);
   }
 
   .attachment-row {

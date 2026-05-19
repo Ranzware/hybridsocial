@@ -37,6 +37,7 @@ export async function getMessages(
 export function sendMessage(conversationId: string, data: {
   content: string;
   media_ids?: string[];
+  reply_to_id?: string;
 }): Promise<Message> {
   return api.post(`/api/v1/conversations/${conversationId}/messages`, data);
 }

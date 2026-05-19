@@ -339,6 +339,11 @@ export interface Message {
   created_at: string;
   edited_at: string | null;
   read_at: string | null;
+  // Lowest delivery state across recipients. Server only populates this
+  // on messages the current viewer sent — never on incoming ones — so
+  // recipient bubbles never accidentally display ticks for someone
+  // else's message.
+  delivery_status?: 'sent' | 'delivered' | 'read' | null;
   pending?: boolean;
 }
 

@@ -32,6 +32,16 @@
   let hasMore = $state(true);
   let messagesEndEl: HTMLDivElement | undefined = $state();
   let typingUser = $state<string | null>(null);
+  // The message the user is currently composing a reply to. Cleared on
+  // send / cancel / conversation switch. The composer renders a quoted
+  // preview while this is non-null and includes reply_to_id in the
+  // send payload.
+  let replyingTo = $state<Message | null>(null);
+
+  // O(1) lookup for rendering quoted previews on incoming bubbles
+  // that have a non-null reply_to_id. Recomputes from the messages
+  // array whenever it changes.
+  let messagesById = $derived(new Map(messages.map((m) => [m.id, m])));
 
   let userId = $state('');
   currentUser.subscribe((u) => {
@@ -73,6 +83,7 @@
     cursor = null;
     hasMore = true;
     loading = true;
+    replyingTo = null;
 
     void (async () => {
       try {
@@ -117,9 +128,41 @@
       case 'chat.new_message':
         appendLiveMessage(data as unknown as Message);
         break;
-      case 'chat.read':
-        // Other participant marked read — nothing to render here yet.
+      case 'chat.delivered': {
+        const { message_id, status } = data as { message_id: string; status?: string };
+        if (!message_id) break;
+        // Only the sender cares about the tick flip; recipient bubbles
+        // don't render delivery_status. We still update everyone's
+        // local copy uniformly — the bubble decides what to show.
+        messages = messages.map((m) =>
+          m.id === message_id
+            ? { ...m, delivery_status: (status || 'delivered') as Message['delivery_status'] }
+            : m,
+        );
         break;
+      }
+      case 'chat.read': {
+        // The other participant just opened the conversation. Bump
+        // every one of MY sent messages up to (and including) their
+        // last_read_message_id to 'read' so the ticks colour. The
+        // backend already persisted the state change; this just keeps
+        // the UI in sync without a refetch.
+        const { identity_id, last_read_message_id } = data as {
+          identity_id: string;
+          last_read_message_id?: string;
+        };
+        if (!last_read_message_id || identity_id === userId) break;
+        const cutoffIdx = messages.findIndex((m) => m.id === last_read_message_id);
+        if (cutoffIdx === -1) break;
+        const cutoffAt = new Date(messages[cutoffIdx].created_at).getTime();
+        messages = messages.map((m) => {
+          if (m.sender.id !== userId) return m;
+          const at = new Date(m.created_at).getTime();
+          if (at <= cutoffAt) return { ...m, delivery_status: 'read' };
+          return m;
+        });
+        break;
+      }
       case 'chat.reaction_added':
       case 'chat.reaction_removed':
         applyReactionDelta(data as { message_id: string; reactions?: Message['reactions'] });
@@ -172,11 +215,19 @@
   // The previous "disabled while sending" pattern had a sticky bug
   // that left the input frozen until a page refresh; simpler to keep
   // it live and let the async sends resolve independently.
-  async function handleSend(content: string, mediaIds: string[] = []) {
+  async function handleSend(
+    content: string,
+    mediaIds: string[] = [],
+    replyToId: string | null = null,
+  ) {
+    // Snapshot the reply target so a late-resolving send can't clobber
+    // the user's next "fresh" message with a stale reply chip.
+    replyingTo = null;
     try {
       const msg = await sendMessage(conversationId, {
         content,
         ...(mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+        ...(replyToId ? { reply_to_id: replyToId } : {}),
       });
       // The SSE stream broadcasts our own message back to us, and the
       // POST response can race with it either direction. If we blindly
@@ -199,6 +250,20 @@
     requestAnimationFrame(() => {
       messagesEndEl?.scrollIntoView({ behavior: 'smooth' });
     });
+  }
+
+  function scrollToMessage(messageId: string) {
+    // The bubble's `data-message-id` is set on its outer slot below.
+    // We only scroll if the original is loaded into the DOM (it might
+    // be paged out above the cursor); otherwise the tap is a no-op.
+    const el = document.querySelector(
+      `[data-message-id="${CSS.escape(messageId)}"]`,
+    );
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('bubble-slot-highlight');
+      setTimeout(() => el.classList.remove('bubble-slot-highlight'), 1500);
+    }
   }
 
   // Toggled true for ~600ms after a new bubble is appended; bubbles
@@ -392,14 +457,21 @@
       {/if}
 
       {#each messages as message, i (message.id)}
-        <div class="bubble-slot" style="--ripple-i: {messages.length - 1 - i}">
+        <div
+          class="bubble-slot"
+          data-message-id={message.id}
+          style="--ripple-i: {messages.length - 1 - i}"
+        >
           <MessageBubble
             {message}
             isOwn={message.sender.id === userId}
             showAvatar={shouldShowAvatar(i)}
+            replyTo={message.reply_to_id ? messagesById.get(message.reply_to_id) ?? null : null}
             ondelete={handleDeleteMessage}
             onreact={handleReactMessage}
             onedit={handleEditMessage}
+            onreply={(m) => { replyingTo = m; }}
+            onreplyclick={scrollToMessage}
           />
         </div>
       {/each}
@@ -411,7 +483,11 @@
       <div bind:this={messagesEndEl} class="messages-end" aria-hidden="true"></div>
     </div>
 
-    <MessageInput onsend={handleSend} />
+    <MessageInput
+      onsend={handleSend}
+      {replyingTo}
+      oncancelreply={() => (replyingTo = null)}
+    />
   {/if}
 </div>
 
@@ -422,6 +498,17 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  .bubble-slot {
+    transition: background var(--transition-fast);
+    border-radius: var(--radius-md);
+  }
+
+  /* Brief tinted flash on the bubble that a reply-quote click jumps
+     to — gives the user a clear "this is the message" anchor. */
+  :global(.bubble-slot-highlight) {
+    background: var(--color-primary-soft);
   }
 
   .detail-header {
