@@ -172,9 +172,12 @@
   // The previous "disabled while sending" pattern had a sticky bug
   // that left the input frozen until a page refresh; simpler to keep
   // it live and let the async sends resolve independently.
-  async function handleSend(content: string) {
+  async function handleSend(content: string, mediaIds: string[] = []) {
     try {
-      const msg = await sendMessage(conversationId, { content });
+      const msg = await sendMessage(conversationId, {
+        content,
+        ...(mediaIds.length > 0 ? { media_ids: mediaIds } : {}),
+      });
       // The SSE stream broadcasts our own message back to us, and the
       // POST response can race with it either direction. If we blindly
       // append both, {#each messages as m (m.id)} throws

@@ -1,22 +1,109 @@
 <script lang="ts">
+  import { uploadMedia } from '$lib/api/media.js';
+  import type { MediaAttachment } from '$lib/api/types.js';
+  import { addToast } from '$lib/stores/toast.js';
+
   let {
     onsend,
-    onattach,
-    disabled = false
+    disabled = false,
+    maxAttachments = 4,
   }: {
-    onsend?: (content: string) => void;
-    onattach?: () => void;
+    onsend?: (content: string, mediaIds: string[]) => void;
     disabled?: boolean;
+    maxAttachments?: number;
   } = $props();
+
+  // Same gate as PostComposer — reject types up front so we don't
+  // ship an unsupported upload to the server only to have it 4xx.
+  const ACCEPTED_MIME_TYPES = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'video/mp4',
+    'video/webm',
+    'audio/mpeg',
+    'audio/wav',
+    'audio/x-wav',
+    'audio/ogg',
+    'audio/flac',
+    'audio/aac',
+    'audio/mp4',
+    'audio/webm',
+  ]);
+  const ACCEPTED_EXTENSIONS = new Set([
+    '.jpg', '.jpeg', '.png', '.gif', '.webp',
+    '.mp4', '.webm',
+    '.mp3', '.wav', '.ogg', '.oga', '.opus', '.flac', '.aac', '.m4a', '.weba',
+  ]);
+  const ACCEPT_ATTR = [...ACCEPTED_MIME_TYPES, ...ACCEPTED_EXTENSIONS].join(',');
+
+  function isAcceptedFile(f: File): boolean {
+    if (f.type && ACCEPTED_MIME_TYPES.has(f.type)) return true;
+    const dot = f.name.lastIndexOf('.');
+    if (dot < 0) return false;
+    return ACCEPTED_EXTENSIONS.has(f.name.slice(dot).toLowerCase());
+  }
 
   let content = $state('');
   let textareaEl: HTMLTextAreaElement | undefined = $state();
+  let fileInputEl: HTMLInputElement | undefined = $state();
+  let uploaded = $state<MediaAttachment[]>([]);
+  let uploadingCount = $state(0);
+
+  function triggerFileInput() {
+    if (disabled) return;
+    fileInputEl?.click();
+  }
+
+  async function handleFileSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    // Reset value so picking the same file twice in a row still fires
+    // the change event.
+    input.value = '';
+    if (files.length === 0) return;
+    await uploadFiles(files);
+  }
+
+  async function uploadFiles(files: File[]) {
+    const accepted = files.filter(isAcceptedFile);
+    const rejected = files.length - accepted.length;
+    if (rejected > 0) {
+      addToast(`${rejected} file${rejected === 1 ? '' : 's'} skipped — unsupported type`, 'error');
+    }
+    const remaining = maxAttachments - uploaded.length - uploadingCount;
+    const toUpload = accepted.slice(0, Math.max(0, remaining));
+    if (accepted.length > toUpload.length) {
+      addToast(`Maximum ${maxAttachments} attachments per message`, 'error');
+    }
+    if (toUpload.length === 0) return;
+
+    uploadingCount += toUpload.length;
+    try {
+      const results = await Promise.allSettled(toUpload.map((f) => uploadMedia(f)));
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          uploaded = [...uploaded, r.value];
+        } else {
+          addToast('An attachment failed to upload', 'error');
+        }
+      }
+    } finally {
+      uploadingCount = Math.max(0, uploadingCount - toUpload.length);
+    }
+  }
+
+  function removeAttachment(id: string) {
+    uploaded = uploaded.filter((m) => m.id !== id);
+  }
 
   function handleSubmit() {
     const trimmed = content.trim();
-    if (!trimmed || disabled) return;
-    onsend?.(trimmed);
+    if (!canSend) return;
+    onsend?.(trimmed, uploaded.map((m) => m.id));
     content = '';
+    uploaded = [];
     if (textareaEl) {
       textareaEl.style.height = 'auto';
     }
@@ -35,57 +122,152 @@
     textareaEl.style.height = Math.min(textareaEl.scrollHeight, 120) + 'px';
   }
 
-  let canSend = $derived(content.trim().length > 0 && !disabled);
+  // Allow sending when there's text OR at least one finished attachment.
+  // While an upload is still in flight, keep the user from racing it —
+  // the server would reject media_ids that aren't ready yet.
+  let canSend = $derived(
+    !disabled &&
+      uploadingCount === 0 &&
+      (content.trim().length > 0 || uploaded.length > 0),
+  );
+
+  function previewKind(m: MediaAttachment): 'image' | 'video' | 'audio' | 'other' {
+    if (m.type === 'image' || m.type === 'gifv') return 'image';
+    if (m.type === 'video') return 'video';
+    if (m.type === 'audio') return 'audio';
+    return 'other';
+  }
 </script>
 
 <div class="message-input-bar">
-  <button
-    type="button"
-    class="attach-btn"
-    onclick={onattach}
-    aria-label="Attach media"
-    {disabled}
-  >
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-    </svg>
-  </button>
+  {#if uploaded.length > 0 || uploadingCount > 0}
+    <div class="attachment-row">
+      {#each uploaded as m (m.id)}
+        {@const kind = previewKind(m)}
+        <div class="attachment-tile" title={m.description ?? m.id}>
+          {#if kind === 'image' && (m.preview_url || m.url)}
+            <img src={m.preview_url ?? m.url} alt="" />
+          {:else if kind === 'video'}
+            <div class="attachment-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="23 7 16 12 23 17 23 7" />
+                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+              </svg>
+            </div>
+          {:else if kind === 'audio'}
+            <div class="attachment-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 18V5l12-2v13" />
+                <circle cx="6" cy="18" r="3" />
+                <circle cx="18" cy="16" r="3" />
+              </svg>
+            </div>
+          {:else}
+            <div class="attachment-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+            </div>
+          {/if}
+          <button
+            type="button"
+            class="attachment-remove"
+            onclick={() => removeAttachment(m.id)}
+            aria-label="Remove attachment"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      {/each}
+      {#each Array(uploadingCount) as _, i (i)}
+        <div class="attachment-tile attachment-tile-loading" aria-label="Uploading">
+          <div class="attachment-spinner"></div>
+        </div>
+      {/each}
+    </div>
+  {/if}
 
-  <textarea
-    bind:this={textareaEl}
-    bind:value={content}
-    class="message-textarea"
-    placeholder="Write a message..."
-    rows="1"
-    dir="auto"
-    onkeydown={handleKeydown}
-    oninput={autoResize}
-    {disabled}
-  ></textarea>
+  <div class="message-input-row">
+    <input
+      bind:this={fileInputEl}
+      type="file"
+      class="file-input"
+      accept={ACCEPT_ATTR}
+      multiple
+      onchange={handleFileSelected}
+      aria-hidden="true"
+      tabindex="-1"
+    />
 
-  <button
-    type="button"
-    class="send-btn"
-    class:active={canSend}
-    onclick={handleSubmit}
-    disabled={!canSend}
-    aria-label="Send message"
-  >
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <line x1="22" y1="2" x2="11" y2="13" />
-      <polygon points="22 2 15 22 11 13 2 9 22 2" />
-    </svg>
-  </button>
+    <button
+      type="button"
+      class="attach-btn"
+      onclick={triggerFileInput}
+      aria-label="Attach media"
+      disabled={disabled || uploaded.length + uploadingCount >= maxAttachments}
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+      </svg>
+    </button>
+
+    <textarea
+      bind:this={textareaEl}
+      bind:value={content}
+      class="message-textarea"
+      placeholder="Write a message..."
+      rows="1"
+      dir="auto"
+      onkeydown={handleKeydown}
+      oninput={autoResize}
+      {disabled}
+    ></textarea>
+
+    <button
+      type="button"
+      class="send-btn"
+      class:active={canSend}
+      onclick={handleSubmit}
+      disabled={!canSend}
+      aria-label="Send message"
+    >
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13" />
+        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+      </svg>
+    </button>
+  </div>
 </div>
 
 <style>
   .message-input-bar {
     display: flex;
-    align-items: flex-end;
+    flex-direction: column;
     gap: var(--space-2);
     padding: var(--space-3) var(--space-4);
     border-block-start: 1px solid var(--color-border);
     background: var(--color-bg);
+  }
+
+  .message-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
+  }
+
+  .file-input {
+    /* Visually hidden but still focusable / clickable via .click() —
+       display: none would block the synthetic click on some browsers. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .attach-btn {
@@ -174,5 +356,78 @@
 
   .send-btn:disabled {
     cursor: not-allowed;
+  }
+
+  .attachment-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .attachment-tile {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .attachment-tile img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .attachment-icon {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-secondary);
+  }
+
+  .attachment-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-full);
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .attachment-remove:hover {
+    background: rgba(0, 0, 0, 0.8);
+  }
+
+  .attachment-tile-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .attachment-spinner {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--color-border);
+    border-top-color: var(--color-primary);
+    animation: dm-spin 0.7s linear infinite;
+  }
+
+  @keyframes dm-spin {
+    to { transform: rotate(360deg); }
   }
 </style>
