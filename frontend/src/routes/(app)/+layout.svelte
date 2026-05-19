@@ -21,13 +21,12 @@
   import { onDestroy } from 'svelte';
   import { page } from '$app/state';
 
-  // Routes where the floating "new post" FAB makes no sense and just
-  // gets in the way of real UI (DMs hide the message input behind it;
-  // admin/settings are task-focused and the user isn't there to post).
-  const NO_COMPOSER_PREFIXES = ['/messages', '/admin', '/settings'];
-  let showComposer = $derived(
-    !NO_COMPOSER_PREFIXES.some((p) => page.url.pathname.startsWith(p)),
-  );
+  // The floating "+" FAB was retired in favour of an inline "New
+  // post" button at the foot of the left sidebar — see Sidebar.svelte.
+  // PostComposer still needs to be mounted globally so the
+  // `open-composer` event from anywhere (sidebar button, DM→post
+  // fallback, group/page composer triggers) opens the modal.
+  const showComposer = false;
 
   let { children } = $props();
   let authState = $state({ user: null as any, initialized: false });

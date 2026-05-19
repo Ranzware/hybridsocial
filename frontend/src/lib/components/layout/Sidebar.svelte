@@ -40,6 +40,18 @@
   function isActive(href: string): boolean {
     return page.url.pathname === href || page.url.pathname.startsWith(href + '/');
   }
+
+  // Routes where opening the global composer doesn't make sense
+  // (DMs have their own composer, settings/admin are task-focused).
+  // Mirrors the gate the FAB used to apply.
+  const NO_COMPOSE_PREFIXES = ['/messages', '/admin', '/settings'];
+  let showCompose = $derived(
+    !NO_COMPOSE_PREFIXES.some((p) => page.url.pathname.startsWith(p)),
+  );
+
+  function openComposer() {
+    window.dispatchEvent(new CustomEvent('open-composer', { detail: {} }));
+  }
 </script>
 
 <aside class="sidebar">
@@ -70,6 +82,28 @@
           </a>
         </li>
       {/each}
+      {#if showCompose}
+        <!-- Composer trigger lives at the foot of the nav list rather
+             than as a floating FAB. Same gating as the old FAB —
+             hidden inside DMs / admin / settings where it'd just be
+             in the way. -->
+        <li>
+          <button
+            type="button"
+            class="nav-item nav-item-compose"
+            onclick={openComposer}
+            aria-label="Compose new post"
+          >
+            <span class="nav-icon-wrap">
+              <svg class="nav-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5" />
+                <path d="M18.586 3.586a2 2 0 112.828 2.828L12 16l-4 1 1-4 9.586-9.414z" />
+              </svg>
+            </span>
+            <span class="nav-label">New post</span>
+          </button>
+        </li>
+      {/if}
     </ul>
   </nav>
 
@@ -132,6 +166,23 @@
     background: var(--color-secondary-container);
     color: var(--color-primary);
     font-weight: 600;
+  }
+
+  /* Compose is rendered as a <button>; reset the user-agent styles
+     so it lines up pixel-for-pixel with the <a> nav items above. */
+  button.nav-item {
+    width: 100%;
+    background: var(--color-primary);
+    color: var(--color-text-on-primary);
+    border: none;
+    cursor: pointer;
+    margin-block-start: var(--space-2);
+    font-weight: 600;
+  }
+
+  button.nav-item:hover {
+    background: var(--color-primary-hover);
+    color: var(--color-text-on-primary);
   }
 
   .nav-icon {
