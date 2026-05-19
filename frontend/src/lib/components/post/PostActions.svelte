@@ -49,6 +49,7 @@
   import { onMount } from 'svelte';
   import { premiumCatalog, ensurePremiumCatalog, type PremiumReactionGlyph } from '$lib/stores/reaction-catalog.js';
   import { openMenuId } from '$lib/stores/open-menu.js';
+  import { currentUser } from '$lib/stores/auth.js';
 
   // Premium reactions are admin-curated bare shortcodes like "fire".
   // Without resolving them through the shared catalog they used to
@@ -91,6 +92,12 @@
   // synthetic click that follows touchend doesn't fall through to
   // toggleReactionPicker() and double-fire as a stray "like".
   let touchHandled = false;
+  // Wall-clock timestamp (ms epoch) up to which any pointerenter /
+  // mouseenter on the wrapper is treated as a touch-synthesized event
+  // and ignored. Without this, Android Chrome fires a phantom
+  // mouseenter after touchend → the desktop picker would pop up
+  // *behind* the radial dial — see Screenshot_20260519_215337.
+  let suppressHoverUntil = 0;
   const LONG_PRESS_MS = 320;
   const SCROLL_CANCEL_PX = 12;
 
@@ -317,10 +324,10 @@
     handleReaction('like');
   }
 
-  // The default 7 reactions, used by the radial dial. Mirrors the
-  // canonical list in ReactionPicker.svelte / reactionEmojis above —
-  // keep the three in sync.
-  const radialReactions = [
+  // The default 7 reactions every user can pick. Mirrors the canonical
+  // list in ReactionPicker.svelte / reactionEmojis above — keep all
+  // three in sync.
+  const defaultRadialReactions: Array<{ type: string; emoji: string; label: string; image?: string | null }> = [
     { type: 'like', emoji: '\u{1F44D}', label: 'Like' },
     { type: 'love', emoji: '\u{2764}\u{FE0F}', label: 'Love' },
     { type: 'wow', emoji: '\u{1F92F}', label: 'Wow' },
@@ -330,8 +337,42 @@
     { type: 'lol', emoji: '\u{1F602}', label: 'LOL' },
   ];
 
+  // Premium reactions get appended for tiers whose limits include
+  // `custom_emoji` — same gate the desktop ReactionPicker uses. The
+  // radial layout adapts its radius to the count, so this can grow
+  // up to a sensible cap without crowding the arc.
+  const RADIAL_MAX = 14;
+  let isPremiumUser = $derived(!!$currentUser?.limits?.custom_emoji);
+  let radialReactions = $derived.by(() => {
+    if (!isPremiumUser) return defaultRadialReactions;
+    const extras: Array<{ type: string; emoji: string; label: string; image?: string | null }> = [];
+    for (const [type, glyph] of $premiumCatalog) {
+      extras.push({
+        type,
+        emoji: glyph.character || ':' + type + ':',
+        label: type,
+        image: glyph.image_url ?? null,
+      });
+    }
+    return [...defaultRadialReactions, ...extras].slice(0, RADIAL_MAX);
+  });
+
   function reactionTouchStart(e: TouchEvent) {
     if (e.touches.length !== 1) return;
+    // Suppress the native long-press menu (Copy / Share / Select all
+    // on Android; the iOS callout). Without this, the OS hijacks the
+    // gesture mid-hold and pops a text-selection toolbar over the
+    // post — see Screenshot_20260519_215315 / _215337.
+    if (e.cancelable) e.preventDefault();
+    // Touch input takes the desktop hover-picker offline for this
+    // interaction; suppressTouchUntil also blocks the synthetic
+    // mouseenter that mobile browsers emit after touch.
+    suppressHoverUntil = Date.now() + 800;
+    if (showReactionPicker) showReactionPicker = false;
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+      hoverTimer = null;
+    }
     const t = e.touches[0];
     touchStartX = t.clientX;
     touchStartY = t.clientY;
@@ -347,6 +388,10 @@
     longPressTimer = setTimeout(() => {
       longPressTimer = null;
       radialOpen = true;
+      // Belt and suspenders — if the desktop picker somehow opened
+      // (e.g. a stray mouseenter slipped through before suppressHover
+      // armed), close it so the two pickers never stack.
+      showReactionPicker = false;
       // Subtle haptic so the user knows the dial has armed.
       if (typeof navigator !== 'undefined' && navigator.vibrate) {
         navigator.vibrate(12);
@@ -381,6 +426,9 @@
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
+    // Keep blocking synthesized mouseenter for a moment past touchend
+    // — Android Chrome fires it ~300ms after the last touch lifts.
+    suppressHoverUntil = Date.now() + 800;
     if (radialOpen) {
       // Suppress the synthetic click that immediately follows
       // touchend, so the toggle handler doesn't also fire "like".
@@ -403,6 +451,7 @@
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
+    suppressHoverUntil = Date.now() + 800;
     radialOpen = false;
     radialHighlighted = null;
   }
@@ -421,7 +470,13 @@
     }
   }
 
-  function handleReactionHoverIn() {
+  function handleReactionHoverIn(e?: PointerEvent) {
+    // Hard guard against touch input: filter the actual PointerEvent
+    // by pointerType, and back-stop with a time window after the last
+    // touchstart in case the browser dispatches a bare mouseenter.
+    if (e && e.pointerType !== 'mouse') return;
+    if (Date.now() < suppressHoverUntil) return;
+    if (radialOpen) return;
     // Cancel close timer if re-entering
     if (closeTimer) {
       clearTimeout(closeTimer);
@@ -872,7 +927,11 @@
 <div class="post-actions" role="group" aria-label="Post actions">
   <div class="post-actions-left">
     <!-- Like / React -->
-    <div class="action-reaction-wrapper" onmouseenter={handleReactionHoverIn} onmouseleave={handleReactionHoverOut}>
+    <div
+      class="action-reaction-wrapper"
+      onpointerenter={handleReactionHoverIn}
+      onpointerleave={(e) => { if (e.pointerType === 'mouse') handleReactionHoverOut(); }}
+    >
       <button
         type="button"
         class="action-btn action-like"
@@ -884,6 +943,7 @@
         ontouchmove={reactionTouchMove}
         ontouchend={reactionTouchEnd}
         ontouchcancel={reactionTouchCancel}
+        oncontextmenu={(e) => e.preventDefault()}
         aria-label="React (long-press for more)"
         aria-expanded={showReactionPicker}
       >
@@ -1531,6 +1591,13 @@
        gesture as a scroll and never fires our touchmove updates,
        leaving the dial frozen on the initial touch point. */
     touch-action: none;
+    /* Suppress the native long-press menu (Copy / Share / Select all
+       on Android, the iOS callout). Combined with preventDefault on
+       touchstart this stops the OS from hijacking the gesture
+       mid-hold — see Screenshot_20260519_215315. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
 
   /* ---- Stacked emoji display (right-side social proof) ---- */

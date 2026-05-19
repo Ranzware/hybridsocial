@@ -32,16 +32,23 @@
   // any emoji is considered "aimed at". Under this radius, releasing
   // cancels the reaction — same UX as the iOS message tapback dial.
   const DEAD_ZONE_PX = 38;
-  // Where the dial arc sits relative to the origin. Picked so that
-  // with a typical action-bar height the arc fits on screen above
-  // the like button on every phone we tested.
-  const ARC_RADIUS = 108;
   // Emojis are laid out across the top semicircle (the half of the
   // dial that's above the button), so the user's thumb never has to
   // travel down into the bottom-tab-bar to reach a reaction. In
   // screen coords (y goes down) that's the angle range 180° → 360°.
   const ARC_START_DEG = 180;
   const ARC_END_DEG = 360;
+
+  // The arc radius and per-item size scale with reaction count so a
+  // 14-emoji dial (premium tier) doesn't overlap itself the way a
+  // fixed-radius layout would.
+  let arcRadius = $derived.by(() => {
+    const n = Math.max(reactions.length, 1);
+    if (n <= 7) return 108;
+    return Math.min(108 + (n - 7) * 12, 188);
+  });
+  let itemSize = $derived(reactions.length > 10 ? 42 : 48);
+  let emojiSize = $derived(reactions.length > 10 ? 24 : 28);
 
   let positions = $derived.by(() => {
     const n = reactions.length;
@@ -52,8 +59,8 @@
       const rad = (deg * Math.PI) / 180;
       return {
         ...r,
-        x: originX + ARC_RADIUS * Math.cos(rad),
-        y: originY + ARC_RADIUS * Math.sin(rad),
+        x: originX + arcRadius * Math.cos(rad),
+        y: originY + arcRadius * Math.sin(rad),
         deg,
       };
     });
@@ -118,19 +125,19 @@
   <!-- Faint guide ring to anchor the eye on the arc center. -->
   <div
     class="radial-ring"
-    style="left: {originX}px; top: {originY}px;"
+    style="left: {originX}px; top: {originY}px; width: {arcRadius * 2}px; height: {arcRadius * 2}px;"
   ></div>
 
   {#each positions as p, i (p.type)}
     <div
       class="radial-item"
       class:radial-item-active={i === activeIdx}
-      style="left: {p.x}px; top: {p.y}px; animation-delay: {30 * i}ms;"
+      style="left: {p.x}px; top: {p.y}px; width: {itemSize}px; height: {itemSize}px; animation-delay: {30 * i}ms;"
     >
       {#if p.image}
-        <img class="radial-image" src={p.image} alt="" />
+        <img class="radial-image" src={p.image} alt="" style="width: {emojiSize}px; height: {emojiSize}px;" />
       {:else}
-        <span class="radial-emoji">{p.emoji}</span>
+        <span class="radial-emoji" style="font-size: {emojiSize}px;">{p.emoji}</span>
       {/if}
     </div>
   {/each}
@@ -142,7 +149,7 @@
     {@const label = positions[activeIdx].label}
     <div
       class="radial-label"
-      style="left: {originX}px; top: {originY - ARC_RADIUS - 36}px;"
+      style="left: {originX}px; top: {originY - arcRadius - 36}px;"
     >
       {label}
     </div>
@@ -172,8 +179,7 @@
   .radial-ring {
     position: absolute;
     transform: translate(-50%, -50%);
-    width: 216px;
-    height: 216px;
+    /* width / height are set inline; they scale with reaction count. */
     border-radius: 50%;
     border: 1px dashed rgba(255, 255, 255, 0.18);
     pointer-events: none;
@@ -183,8 +189,7 @@
   .radial-item {
     position: absolute;
     transform: translate(-50%, -50%) scale(0);
-    width: 48px;
-    height: 48px;
+    /* width / height are set inline; they scale with reaction count. */
     border-radius: 50%;
     background: var(--color-surface-container-lowest, #fff);
     display: flex;
@@ -208,13 +213,12 @@
   }
 
   .radial-emoji {
-    font-size: 28px;
+    /* font-size is set inline; it scales with reaction count. */
     line-height: 1;
   }
 
   .radial-image {
-    width: 28px;
-    height: 28px;
+    /* width / height are set inline; they scale with reaction count. */
     object-fit: contain;
   }
 
