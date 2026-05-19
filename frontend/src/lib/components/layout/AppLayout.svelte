@@ -15,9 +15,9 @@
     children: Snippet;
   } = $props();
 
-  const hideRightSidebarPaths = ['/settings', '/messages', '/admin'];
+  const hideRightSidebarPaths = ['/settings', '/messages', '/admin', '/help'];
   const hideLeftSidebarPaths = ['/settings'];
-  const fullWidthPaths = ['/messages', '/admin', '/settings'];
+  const fullWidthPaths = ['/messages', '/admin', '/settings', '/help'];
 
   let showRightSidebar = $derived(
     !hideRightSidebarPaths.some(p => page.url.pathname.startsWith(p))
