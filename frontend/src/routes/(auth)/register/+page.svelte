@@ -225,7 +225,7 @@
 </script>
 
 <svelte:head>
-  <title>Create account - HybridSocial</title>
+  <title>Create account - Bassam Social</title>
 </svelte:head>
 
 {#if success}

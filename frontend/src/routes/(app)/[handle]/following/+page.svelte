@@ -260,7 +260,7 @@
 </script>
 
 <svelte:head>
-  <title>Following - {handle} - HybridSocial</title>
+  <title>Following - {handle} - Bassam Social</title>
 </svelte:head>
 
 <div class="following-page">

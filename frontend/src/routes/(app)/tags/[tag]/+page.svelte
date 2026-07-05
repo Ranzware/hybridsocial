@@ -78,7 +78,7 @@
 </script>
 
 <svelte:head>
-  <title>#{tag} - HybridSocial</title>
+  <title>#{tag} - Bassam Social</title>
 </svelte:head>
 
 <div class="tag-page">

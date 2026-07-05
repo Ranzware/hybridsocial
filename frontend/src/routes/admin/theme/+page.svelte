@@ -6,25 +6,25 @@
   import type { AdminThemeConfig } from '$lib/api/types.js';
 
   const defaults: AdminThemeConfig = {
-    color_primary: '#0d9488',
-    color_primary_hover: '#0f766e',
-    color_primary_soft: '#ccfbf1',
+    color_primary: '#6c3edd',
+    color_primary_hover: '#5a2fc4',
+    color_primary_soft: '#ede9fc',
     color_primary_contrast: '#ffffff',
     color_secondary: '#6366f1',
-    color_accent: '#14b8a6',
+    color_accent: '#8b6ee6',
     color_success: '#22c55e',
     color_warning: '#f59e0b',
     color_danger: '#ef4444',
     color_info: '#3b82f6',
     color_bg: '#ffffff',
-    color_bg_wash: '#dafff9',
+    color_bg_wash: '#f4f1fd',
     color_surface: '#f8fafc',
     color_border: '#e2e8f0',
     color_text: '#0f172a',
     color_text_secondary: '#64748b',
-    color_text_link: '#0d9488',
-    gradient_start: '#0d9488',
-    gradient_end: '#14b8a6',
+    color_text_link: '#6c3edd',
+    gradient_start: '#6c3edd',
+    gradient_end: '#8b6ee6',
     gradient_direction: '135deg',
     border_radius: 'rounded',
     density: 'comfortable',
@@ -493,7 +493,7 @@
       <div class="preview-frame" style={previewVars}>
         <!-- Header -->
         <div class="preview-header">
-          <span class="preview-logo">{theme.instance_name || 'HybridSocial'}</span>
+          <span class="preview-logo">{theme.instance_name || 'Bassam Social'}</span>
           <div class="preview-nav-dots">
             <span class="preview-dot"></span>
             <span class="preview-dot"></span>

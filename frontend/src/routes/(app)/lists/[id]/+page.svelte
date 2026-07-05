@@ -189,7 +189,7 @@
 </script>
 
 <svelte:head>
-  <title>{list?.title ?? 'List'} - HybridSocial</title>
+  <title>{list?.title ?? 'List'} - Bassam Social</title>
 </svelte:head>
 
 <div class="list-detail-page">

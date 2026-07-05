@@ -112,7 +112,7 @@
 </script>
 
 <svelte:head>
-  <title>{pageData?.display_name || pageData?.name || 'Page'} - HybridSocial</title>
+  <title>{pageData?.display_name || pageData?.name || 'Page'} - Bassam Social</title>
 </svelte:head>
 
 <div class="page-detail">

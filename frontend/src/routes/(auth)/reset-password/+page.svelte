@@ -78,7 +78,7 @@
 </script>
 
 <svelte:head>
-  <title>Reset password - HybridSocial</title>
+  <title>Reset password - Bassam Social</title>
 </svelte:head>
 
 <div class="auth-card">

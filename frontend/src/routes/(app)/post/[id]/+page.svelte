@@ -118,7 +118,7 @@
 </script>
 
 <svelte:head>
-  <title>{post ? `Post by ${post.account.display_name || post.account.handle}` : 'Post'} - HybridSocial</title>
+  <title>{post ? `Post by ${post.account.display_name || post.account.handle}` : 'Post'} - Bassam Social</title>
 </svelte:head>
 
 <div class="post-detail-page">

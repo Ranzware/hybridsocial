@@ -708,7 +708,7 @@
         <h2 class="stitch-section-title">External link warning</h2>
         <p class="stitch-section-desc">
           Pop a confirmation dialog before opening links that lead off
-          HybridSocial. Helps catch typosquatted phishing domains
+          Bassam Social. Helps catch typosquatted phishing domains
           before you visit them.
         </p>
       </div>

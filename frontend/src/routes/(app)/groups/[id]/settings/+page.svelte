@@ -272,7 +272,7 @@
 </script>
 
 <svelte:head>
-  <title>Group Settings - HybridSocial</title>
+  <title>Group Settings - Bassam Social</title>
 </svelte:head>
 
 <div class="settings-page">

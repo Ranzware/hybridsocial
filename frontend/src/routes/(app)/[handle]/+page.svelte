@@ -371,7 +371,7 @@
 </script>
 
 <svelte:head>
-  <title>{account ? (account.display_name || account.handle) : 'Profile'} - HybridSocial</title>
+  <title>{account ? (account.display_name || account.handle) : 'Profile'} - Bassam Social</title>
 </svelte:head>
 
 <div class="profile-page">

@@ -77,7 +77,7 @@
 </script>
 
 <svelte:head>
-  <title>Drafts — HybridSocial</title>
+  <title>Drafts — Bassam Social</title>
 </svelte:head>
 
 <div class="drafts-page">

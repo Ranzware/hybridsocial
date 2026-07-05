@@ -122,7 +122,7 @@
 </script>
 
 <svelte:head>
-  <title>Explore - HybridSocial</title>
+  <title>Explore - Bassam Social</title>
 </svelte:head>
 
 <div class="explore-page">

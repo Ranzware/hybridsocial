@@ -202,7 +202,7 @@
 </script>
 
 <svelte:head>
-  <title>Sign in - HybridSocial</title>
+  <title>Sign in - Bassam Social</title>
 </svelte:head>
 
 <div class="auth-card">
@@ -413,7 +413,7 @@
 
 {#if !otpRequired}
   <div class="auth-info-card">
-    <h3 class="auth-info-title">New to HybridSocial?</h3>
+    <h3 class="auth-info-title">New to Bassam Social?</h3>
     <p class="auth-info-desc">
       Create your own server in minutes or join a community run by others.
     </p>

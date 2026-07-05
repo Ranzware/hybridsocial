@@ -2972,7 +2972,7 @@
     width: 32px;
     height: 32px;
     border-radius: 9999px;
-    background: var(--color-primary, #006a69);
+    background: var(--color-primary, #6c3edd);
     color: #fff;
     display: flex;
     align-items: center;

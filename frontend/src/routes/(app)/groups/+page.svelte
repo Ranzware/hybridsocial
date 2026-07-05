@@ -97,7 +97,7 @@
 </script>
 
 <svelte:head>
-  <title>Groups - HybridSocial</title>
+  <title>Groups - Bassam Social</title>
 </svelte:head>
 
 <div class="groups-page">

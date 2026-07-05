@@ -7,6 +7,7 @@
   import { dmUnreadTotal } from '$lib/stores/dm-unread.js';
   import { api } from '$lib/api/client.js';
   import type { Identity } from '$lib/api/types.js';
+  import { themeStore } from '$lib/stores/theme.js';
 
   let user: Identity | null = $state(null);
   let authenticated = $state(false);
@@ -104,18 +105,22 @@
   <div class="header-inner">
     <!-- Logo + Nav -->
     <div class="header-start">
-      <a href="/home" class="header-logo" aria-label="HybridSocial home">
-        <svg class="logo-mark" width="32" height="32" viewBox="0 0 32 32" fill="none">
-          <rect width="32" height="32" rx="10" fill="url(#logo-grad)" />
-          <text x="16" y="22" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="'Manrope', sans-serif">H</text>
-          <defs>
-            <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32">
-              <stop offset="0%" stop-color="#006a69" />
-              <stop offset="100%" stop-color="#0ea5a4" />
-            </linearGradient>
-          </defs>
-        </svg>
-        <span class="header-logo-text">HybridSocial</span>
+      <a href="/home" class="header-logo" aria-label="Bassam Social home">
+        {#if $themeStore?.logo_url}
+          <img src={$themeStore.logo_url} alt="Bassam Social" class="header-logo-img" />
+        {:else}
+          <svg class="logo-mark" width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="10" fill="url(#logo-grad)" />
+            <text x="16" y="22" text-anchor="middle" fill="white" font-size="16" font-weight="800" font-family="'Manrope', sans-serif">B</text>
+            <defs>
+              <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32">
+                <stop offset="0%" stop-color="#6c3edd" />
+                <stop offset="100%" stop-color="#7183da" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="header-logo-text">Bassam Social</span>
+        {/if}
       </a>
 
     </div>
@@ -250,6 +255,13 @@
     font-size: var(--text-lg);
     color: var(--color-primary);
     letter-spacing: -0.02em;
+  }
+
+  .header-logo-img {
+    height: 34px;
+    width: auto;
+    max-width: 170px;
+    display: block;
   }
 
   /* --- Search --- */

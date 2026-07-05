@@ -413,7 +413,7 @@
 </script>
 
 <svelte:head>
-  <title>{displayName} - Messages - HybridSocial</title>
+  <title>{displayName} - Messages - Bassam Social</title>
 </svelte:head>
 
 <div class="conversation-detail">

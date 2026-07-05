@@ -66,12 +66,12 @@
     </button>
 
     <div class="banner-icon">
-      <img src="/icons/icon.svg" alt="HybridSocial" width="40" height="40" />
+      <img src="/icons/icon.svg" alt="Bassam Social" width="40" height="40" />
     </div>
 
     <div class="banner-text">
       <strong class="banner-title">Get the app</strong>
-      <span class="banner-subtitle">HybridSocial works better with the app</span>
+      <span class="banner-subtitle">Bassam Social works better with the app</span>
     </div>
 
     <div class="banner-actions">

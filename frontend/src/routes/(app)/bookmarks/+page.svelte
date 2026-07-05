@@ -47,7 +47,7 @@
 </script>
 
 <svelte:head>
-  <title>Bookmarks - HybridSocial</title>
+  <title>Bookmarks - Bassam Social</title>
 </svelte:head>
 
 <div class="bookmarks-page">

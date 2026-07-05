@@ -90,7 +90,7 @@
 </script>
 
 <svelte:head>
-  <title>Streams - HybridSocial</title>
+  <title>Streams - Bassam Social</title>
 </svelte:head>
 
 <div class="streams-page">

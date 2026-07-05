@@ -145,7 +145,7 @@
     tabindex="-1"
   >
     <div class="elw-modal" role="document">
-      <h2 id="elw-title" class="elw-title">Leaving HybridSocial</h2>
+      <h2 id="elw-title" class="elw-title">Leaving Bassam Social</h2>
       <p class="elw-sub">
         You're about to open a link on another site. Check the URL
         below carefully — phishing pages often use lookalike domains.

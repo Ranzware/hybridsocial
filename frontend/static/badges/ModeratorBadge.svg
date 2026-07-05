@@ -15,7 +15,7 @@
     <linearGradient
        id="swatch61">
       <stop
-         style="stop-color:#197569;stop-opacity:1;"
+         style="stop-color:#6c3edd;stop-opacity:1;"
          offset="0"
          id="stop61" />
     </linearGradient>
@@ -50,12 +50,12 @@
          class="st0"
          d="m 20.659827,-35.598291 c -0.624024,-0.03465 -1.16501,-0.274291 -1.484311,-0.657458 l -0.386038,-0.463255 -0.386051,0.463255 c -0.319289,0.383178 -0.860275,0.622804 -1.484311,0.657458 l -0.474644,0.02635 v 2.192217 c 0,1.394696 1.896095,2.426007 2.112248,2.53901 l 0.232758,0.12171 0.232758,-0.12171 c 0.21614,-0.112993 2.112236,-1.144314 2.112236,-2.53901 v -2.192217 z"
          id="path61"
-         style="display:inline;fill:#156960;fill-opacity:1;stroke:none;stroke-width:0.0117188" />
+         style="display:inline;fill:#5a2fc4;fill-opacity:1;stroke:none;stroke-width:0.0117188" />
       <path
          class="st0"
          d="m 20.325288,-35.241445 c -0.512408,-0.02845 -0.956631,-0.22523 -1.218822,-0.539861 l -0.316989,-0.380396 -0.317001,0.380396 c -0.26218,0.314642 -0.706403,0.511407 -1.21882,0.539861 l -0.389748,0.02165 v 1.800107 c 0,1.145237 1.556953,1.992083 1.734443,2.084873 l 0.191126,0.09994 0.191127,-0.09994 c 0.177479,-0.09279 1.734431,-0.939636 1.734431,-2.084873 v -1.800107 z"
          id="path8"
-         style="display:inline;fill:#156960;fill-opacity:1;stroke:#ffffff;stroke-width:0.191102;stroke-dasharray:none;stroke-opacity:1" />
+         style="display:inline;fill:#5a2fc4;fill-opacity:1;stroke:#ffffff;stroke-width:0.191102;stroke-dasharray:none;stroke-opacity:1" />
     </g>
   </g>
 </svg>

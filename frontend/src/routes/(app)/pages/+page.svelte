@@ -173,7 +173,7 @@
 </script>
 
 <svelte:head>
-  <title>Pages - HybridSocial</title>
+  <title>Pages - Bassam Social</title>
 </svelte:head>
 
 <div class="pages-page">

@@ -54,7 +54,7 @@
 </script>
 
 <svelte:head>
-  <title>{sitePage?.title || 'Page'} - HybridSocial</title>
+  <title>{sitePage?.title || 'Page'} - Bassam Social</title>
 </svelte:head>
 
 {#if loading}

@@ -114,7 +114,7 @@
 </script>
 
 <svelte:head>
-  <title>Scheduled Posts - HybridSocial</title>
+  <title>Scheduled Posts - Bassam Social</title>
 </svelte:head>
 
 <div class="scheduled-page">

@@ -47,7 +47,7 @@
 </script>
 
 <svelte:head>
-  <title>Donate to @{handle} - HybridSocial</title>
+  <title>Donate to @{handle} - Bassam Social</title>
 </svelte:head>
 
 <div class="donate-page">
@@ -111,7 +111,7 @@
       {/if}
 
       <p class="donate-disclaimer">
-        Donations are sent directly to the user's wallet. HybridSocial does not process or take a cut of any donations.
+        Donations are sent directly to the user's wallet. Bassam Social does not process or take a cut of any donations.
       </p>
     </div>
 

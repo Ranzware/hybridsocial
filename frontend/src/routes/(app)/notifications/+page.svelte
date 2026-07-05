@@ -150,7 +150,7 @@
 </script>
 
 <svelte:head>
-  <title>Notifications - HybridSocial</title>
+  <title>Notifications - Bassam Social</title>
 </svelte:head>
 
 <div class="notifications-page">

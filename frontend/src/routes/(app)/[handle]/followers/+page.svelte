@@ -92,7 +92,7 @@
 </script>
 
 <svelte:head>
-  <title>Followers - {handle} - HybridSocial</title>
+  <title>Followers - {handle} - Bassam Social</title>
 </svelte:head>
 
 <div class="followers-page">

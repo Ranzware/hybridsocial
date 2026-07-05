@@ -9,7 +9,7 @@
 </script>
 
 <svelte:head>
-  <title>Settings - HybridSocial</title>
+  <title>Settings - Bassam Social</title>
 </svelte:head>
 
 <div class="settings-shell" class:is-index={isIndex}>

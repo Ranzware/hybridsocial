@@ -73,7 +73,7 @@
 </script>
 
 <svelte:head>
-  <title>Donation Settings - HybridSocial</title>
+  <title>Donation Settings - Bassam Social</title>
 </svelte:head>
 
 <div class="donations-page">

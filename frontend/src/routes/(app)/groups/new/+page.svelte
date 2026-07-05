@@ -45,7 +45,7 @@
 </script>
 
 <svelte:head>
-  <title>New group — HybridSocial</title>
+  <title>New group — Bassam Social</title>
 </svelte:head>
 
 <div class="new-group-page">

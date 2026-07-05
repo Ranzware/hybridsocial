@@ -15,7 +15,7 @@
     <linearGradient
        id="swatch61">
       <stop
-         style="stop-color:#197569;stop-opacity:1;"
+         style="stop-color:#6c3edd;stop-opacity:1;"
          offset="0"
          id="stop61" />
     </linearGradient>
@@ -51,19 +51,19 @@
          class="st0"
          d="m -6.1509386,-72.267674 c -0.6240222,-0.03465 -1.1650067,-0.274289 -1.4843071,-0.657457 l -0.3860398,-0.463253 -0.38605,0.463253 c -0.3192892,0.38318 -0.8602736,0.622804 -1.4843082,0.657457 l -0.4746443,0.02636 v 2.192214 c 0,1.394696 1.8960932,2.426003 2.1122451,2.539007 l 0.2327574,0.121711 0.2327584,-0.121711 c 0.2161406,-0.112992 2.1122331,-1.144311 2.1122331,-2.539007 v -2.192214 z"
          id="path9-8"
-         style="display:inline;fill:#156960;fill-opacity:1;stroke:none;stroke-width:0.0117187" />
+         style="display:inline;fill:#5a2fc4;fill-opacity:1;stroke:none;stroke-width:0.0117187" />
       <path
          class="st0"
          d="m -6.6158902,-71.761709 c -0.4688974,-0.02603 -0.8753979,-0.206105 -1.1153233,-0.49402 l -0.2900732,-0.348094 -0.2900828,0.348094 c -0.239916,0.287925 -0.6464174,0.467982 -1.1153233,0.49402 l -0.3566522,0.0198 v 1.64725 c 0,1.047988 1.424743,1.822924 1.5871615,1.907836 l 0.1748968,0.09145 0.1748977,-0.09145 c 0.162409,-0.08491 1.587152,-0.859848 1.587152,-1.907836 v -1.64725 z"
          id="path10-8"
-         style="display:inline;fill:#156960;fill-opacity:1;stroke:#ffffff;stroke-width:0.357799;stroke-dasharray:none;stroke-opacity:1" />
+         style="display:inline;fill:#5a2fc4;fill-opacity:1;stroke:#ffffff;stroke-width:0.357799;stroke-dasharray:none;stroke-opacity:1" />
       <g
          id="g23"
          transform="translate(-0.09095178,0.07854859)">
         <g
            id="g21"
            transform="matrix(0.3774498,0,0,0.3774498,-42.242917,-74.697312)"
-           style="display:inline;fill:#1fa899;fill-opacity:1">
+           style="display:inline;fill:#7183da;fill-opacity:1">
           <path
              d="m 92.899742,10.502918 c 0,1.060737 -0.859901,1.920635 -1.920637,1.920635 1.060736,0 1.920637,0.859889 1.920637,1.920634 0,-1.060745 0.859889,-1.920634 1.920633,-1.920634 -1.060744,0 -1.920633,-0.859898 -1.920633,-1.920635 z"
              stroke="#000000"

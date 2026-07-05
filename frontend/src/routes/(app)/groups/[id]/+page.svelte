@@ -158,7 +158,7 @@
 </script>
 
 <svelte:head>
-  <title>{group?.name ?? 'Group'} - HybridSocial</title>
+  <title>{group?.name ?? 'Group'} - Bassam Social</title>
 </svelte:head>
 
 <div class="group-detail-page">

@@ -46,7 +46,7 @@
     font-size: 6rem;
     font-weight: 800;
     line-height: 1;
-    color: var(--color-primary, #0d9488);
+    color: var(--color-primary, #6c3edd);
     margin-block-end: var(--space-2, 0.5rem);
   }
 
@@ -67,7 +67,7 @@
   .error-home-btn {
     display: inline-block;
     padding: var(--space-3, 0.75rem) var(--space-6, 1.5rem);
-    background: var(--color-primary, #0d9488);
+    background: var(--color-primary, #6c3edd);
     color: var(--color-text-inverse, #fff);
     border-radius: var(--radius-full, 9999px);
     text-decoration: none;
@@ -77,7 +77,7 @@
   }
 
   .error-home-btn:hover {
-    background: var(--color-primary-hover, #0f766e);
+    background: var(--color-primary-hover, #5a2fc4);
     text-decoration: none;
   }
 </style>

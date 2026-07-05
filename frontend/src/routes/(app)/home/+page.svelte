@@ -49,7 +49,7 @@
 </script>
 
 <svelte:head>
-  <title>Home - HybridSocial</title>
+  <title>Home - Bassam Social</title>
 </svelte:head>
 
 <div class="home-page">
