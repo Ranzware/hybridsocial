@@ -12,7 +12,9 @@ defmodule Hybridsocial.Accounts.Identity do
     field :handle, :string
     field :ap_actor_url, :string
     field :public_key, :string
-    field :private_key, :string
+    # Encrypted at rest — a leaked DB dump must not hand over the keys that
+    # let someone forge this actor's federation signatures.
+    field :private_key, Hybridsocial.Crypto.EncryptedBinary, context: "identity.private_key"
     field :inbox_url, :string
     field :outbox_url, :string
     field :followers_url, :string

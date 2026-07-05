@@ -55,6 +55,14 @@ if message_encryption_key = System.get_env("MESSAGE_ENCRYPTION_KEY") do
   config :hybridsocial, :message_encryption_key, message_encryption_key
 end
 
+# At-rest field encryption (actor private keys, 2FA secrets, emails).
+# Generate with: `openssl rand -base64 32`
+# Losing this key makes those fields unrecoverable — back it up, and keep it
+# off the DB host. Move to Vault/KMS by swapping :crypto_key_provider.
+if data_encryption_key = System.get_env("DATA_ENCRYPTION_KEY") do
+  config :hybridsocial, :data_encryption_key, data_encryption_key
+end
+
 # Media host — separate domain/subdomain for serving user uploads (security)
 # Must match Caddy/reverse proxy config. Example: https://media.hybridsocial.com
 if media_host = System.get_env("MEDIA_HOST") do

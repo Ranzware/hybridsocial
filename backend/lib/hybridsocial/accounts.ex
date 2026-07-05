@@ -412,10 +412,11 @@ defmodule Hybridsocial.Accounts do
   # --- Authentication ---
 
   def get_user_by_email(email) do
-    email = String.downcase(email)
+    # Look up by the blind index — the email column itself is encrypted.
+    hash = Hybridsocial.Crypto.blind_index(email, "user.email")
 
     User
-    |> where([u], u.email == ^email)
+    |> where([u], u.email_hash == ^hash)
     |> Repo.one()
     |> case do
       nil -> nil
