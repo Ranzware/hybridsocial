@@ -50,6 +50,18 @@ defmodule HybridsocialWeb.Federation.LegacyActorRouteTest do
     assert json["followers"] == ap_url <> "/followers"
   end
 
+  test "GET /users/:nickname redirects a browser (text/html) to the web profile", %{conn: conn} do
+    nick = "legacy#{:erlang.unique_integer([:positive])}"
+    import_actor(nick)
+
+    conn =
+      conn
+      |> put_req_header("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+      |> get("/users/#{nick}")
+
+    assert redirected_to(conn) == "/@#{nick}"
+  end
+
   test "GET /users/:nickname/followers reports the imported collection id", %{conn: conn} do
     nick = "legacy#{:erlang.unique_integer([:positive])}"
     ap_url = import_actor(nick)

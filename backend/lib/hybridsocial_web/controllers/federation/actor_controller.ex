@@ -56,12 +56,29 @@ defmodule HybridsocialWeb.Federation.ActorController do
         not_found(conn)
 
       identity ->
-        actor = ActorSerializer.to_ap(identity)
+        # A browser hitting the canonical actor URL should land on the web
+        # profile, not raw ActivityPub JSON — matches how Pleroma/Mastodon
+        # negotiate. Fediverse servers (activity+json / ld+json) still get
+        # the actor document.
+        if prefers_html?(conn) do
+          redirect(conn, to: "/@" <> identity.handle)
+        else
+          actor = ActorSerializer.to_ap(identity)
 
-        conn
-        |> put_resp_content_type(negotiated_content_type(conn))
-        |> json(actor)
+          conn
+          |> put_resp_content_type(negotiated_content_type(conn))
+          |> json(actor)
+        end
     end
+  end
+
+  defp prefers_html?(conn) do
+    accept =
+      conn |> Plug.Conn.get_req_header("accept") |> List.first() |> to_string() |> String.downcase()
+
+    String.contains?(accept, "text/html") and
+      not String.contains?(accept, "application/activity+json") and
+      not String.contains?(accept, "application/ld+json")
   end
 
   # Picks the content type to emit based on the Accept header. Falls
