@@ -77,6 +77,11 @@
 
 # ---------- Main domain ----------
 {$DOMAIN:localhost} {
+	# Behind Cloudflare: CF terminates public TLS and connects to this
+	# origin over HTTPS. Self-signed is fine with CF SSL mode "Full" (CF
+	# doesn't validate the origin cert), so no Let's Encrypt/ACME is needed.
+	tls internal
+
 	# WebSocket streaming — bypass Coraza (response-body scanning
 	# breaks long-lived connections). CrowdSec still applies via
 	# the global directive order.
