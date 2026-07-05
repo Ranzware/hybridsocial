@@ -58,6 +58,10 @@
 	@streaming path /api/v1/streaming/*
 	handle @streaming {
 		reverse_proxy backend:4000 {
+			# SSE must stream, not buffer. Without flush_interval -1 Caddy
+			# buffers the response, so the client's EventSource never sees
+			# the headers/heartbeats, times out, and reconnect-loops.
+			flush_interval -1
 			transport http {
 				read_timeout 0
 			}
