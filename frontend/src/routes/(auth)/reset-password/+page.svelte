@@ -60,14 +60,25 @@
     loading = true;
 
     try {
-      await api.post('/api/v1/auth/password/confirm', {
+      await api.post('/api/v1/auth/password/change', {
         token,
         password: newPassword,
+        password_confirmation: confirmPassword,
       });
       step = 'done';
     } catch (err) {
       if (err instanceof ApiError) {
-        error = err.body.error_description || err.body.error || 'Failed to reset password';
+        // Map backend error codes to clear, actionable messages.
+        const code = err.body.error;
+        if (code === 'auth.reset_token_expired') {
+          error = 'This reset link has expired. Please request a new one below.';
+        } else if (code === 'auth.invalid_reset_token') {
+          error = 'This reset link is invalid or has already been used.';
+        } else {
+          // validation.failed etc. — ApiError.message already surfaces the
+          // first field-level detail (e.g. the 16-character minimum).
+          error = err.message || err.body.error_description || err.body.error || 'Failed to reset password';
+        }
       } else {
         error = 'An unexpected error occurred. Please try again.';
       }
