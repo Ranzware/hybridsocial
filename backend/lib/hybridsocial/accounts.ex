@@ -124,7 +124,8 @@ defmodule Hybridsocial.Accounts do
   # --- User registration ---
 
   def register_user(attrs) do
-    with :ok <- check_pow(attrs),
+    with :ok <- check_registration_open(),
+         :ok <- check_pow(attrs),
          :ok <- check_turnstile(attrs),
          :ok <- check_email_domain(attrs),
          :ok <- check_handle_available(attrs),
@@ -310,6 +311,15 @@ defmodule Hybridsocial.Accounts do
         else
           :ok
         end
+    end
+  end
+
+  # Backend-authoritative registration gate. "closed" rejects all signups
+  # (the frontend also hides the form, but that isn't enforcement).
+  defp check_registration_open do
+    case Hybridsocial.Config.get("registration_mode", "open") do
+      "closed" -> {:error, :registration_closed}
+      _ -> :ok
     end
   end
 

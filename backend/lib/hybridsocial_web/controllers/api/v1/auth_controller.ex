@@ -33,6 +33,11 @@ defmodule HybridsocialWeb.Api.V1.AuthController do
           message: "account.confirmation_required"
         })
 
+      {:error, :registration_closed} ->
+        conn
+        |> put_status(:forbidden)
+        |> json(%{error: "auth.registration_closed"})
+
       {:error, :pow_required} ->
         conn
         |> put_status(:forbidden)
