@@ -692,7 +692,13 @@ defmodule Hybridsocial.Social do
     |> Enum.map(fn uuid -> Ecto.UUID.load!(uuid) end)
   end
 
-  # Check if an identity is from a remote instance
+  # Check if an identity is from a remote instance. Prefer the explicit
+  # `is_local` flag (correct for imported same-domain actors); fall back
+  # to a base-URL prefix check for bare maps without the field.
+  defp remote?(%Hybridsocial.Accounts.Identity{} = identity) do
+    not Hybridsocial.Federation.LocalUrl.local_identity?(identity)
+  end
+
   defp remote?(%{ap_actor_url: url}) when is_binary(url) do
     base = HybridsocialWeb.Endpoint.url()
     not String.starts_with?(url, base)

@@ -85,8 +85,11 @@ defmodule Hybridsocial.Accounts do
     end)
   end
 
-  defp remote_actor?(%Identity{ap_actor_url: url}) when is_binary(url) do
-    not Hybridsocial.Federation.LocalUrl.local_actor_url?(url)
+  # Authoritative via `is_local` — an imported legacy actor has a
+  # foreign-shaped URL but is local, so the `/actors/` URL heuristic
+  # would wrongly flag it remote.
+  defp remote_actor?(%Identity{} = identity) do
+    not Hybridsocial.Federation.LocalUrl.local_identity?(identity)
   end
 
   defp remote_actor?(_), do: false

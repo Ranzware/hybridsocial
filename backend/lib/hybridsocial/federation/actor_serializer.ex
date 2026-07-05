@@ -13,7 +13,14 @@ defmodule Hybridsocial.Federation.ActorSerializer do
   """
   def to_ap(identity) do
     base_url = HybridsocialWeb.Endpoint.url()
-    actor_url = "#{base_url}/actors/#{identity.id}"
+
+    # Prefer the stored ActivityPub URLs so actors imported from a retired
+    # instance keep their original `id`, collections, and keyId. For
+    # natively-created identities the stored values are exactly the
+    # computed `/actors/<uuid>` forms, so this is byte-identical to what
+    # we served before.
+    computed = "#{base_url}/actors/#{identity.id}"
+    actor_url = identity.ap_actor_url || computed
 
     actor = %{
       "@context" => @ap_context,
@@ -24,11 +31,11 @@ defmodule Hybridsocial.Federation.ActorSerializer do
       "summary" => identity.bio || "",
       "manuallyApprovesFollowers" => identity.is_locked || false,
       "discoverable" => Map.get(identity, :discoverable, true),
-      "inbox" => "#{actor_url}/inbox",
-      "outbox" => "#{actor_url}/outbox",
-      "followers" => "#{actor_url}/followers",
-      "following" => "#{actor_url}/following",
-      "featured" => "#{base_url}/actors/#{identity.id}/collections/featured",
+      "inbox" => identity.inbox_url || "#{actor_url}/inbox",
+      "outbox" => identity.outbox_url || "#{actor_url}/outbox",
+      "followers" => identity.followers_url || "#{actor_url}/followers",
+      "following" => identity.following_url || "#{actor_url}/following",
+      "featured" => identity.featured_url || "#{actor_url}/collections/featured",
       "url" => actor_url,
       "publicKey" => %{
         "id" => "#{actor_url}#main-key",
@@ -38,7 +45,7 @@ defmodule Hybridsocial.Federation.ActorSerializer do
       "attachment" => build_profile_fields(identity.metadata),
       "tag" => build_actor_emoji_tags(identity),
       "endpoints" => %{
-        "sharedInbox" => "#{base_url}/inbox"
+        "sharedInbox" => identity.shared_inbox_url || "#{base_url}/inbox"
       }
     }
 

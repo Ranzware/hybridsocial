@@ -8,8 +8,23 @@ defmodule Hybridsocial.Federation.LegacyIdentityTest do
 
   alias Hybridsocial.Accounts
   alias Hybridsocial.Accounts.Identity
-  alias Hybridsocial.Federation.LocalUrl
+  alias Hybridsocial.Federation.{ActorSerializer, LocalUrl}
   alias Hybridsocial.Repo
+
+  defp register_native(handle) do
+    uniq = :erlang.unique_integer([:positive])
+
+    {:ok, identity} =
+      Accounts.register_user(%{
+        "handle" => "#{handle}_#{uniq}",
+        "email" => "#{handle}_#{uniq}@test.com",
+        "display_name" => handle,
+        "password" => "correct-horse-battery-staple",
+        "password_confirmation" => "correct-horse-battery-staple"
+      })
+
+    identity
+  end
 
   # Minimal well-formed PEM stand-ins — the storage layer treats them as
   # opaque strings; wire-level signing is exercised elsewhere.
@@ -88,6 +103,44 @@ defmodule Hybridsocial.Federation.LegacyIdentityTest do
       base = LocalUrl.base_url()
       assert LocalUrl.local_identity?(%Identity{is_local: nil, ap_actor_url: base <> "/actors/abc"})
       refute LocalUrl.local_identity?(%Identity{is_local: nil, ap_actor_url: "https://remote.social/users/bob"})
+    end
+  end
+
+  describe "ActorSerializer.to_ap/1" do
+    test "native user is byte-identical to the /actors/<uuid> scheme (no regression)" do
+      native = register_native("nativ")
+      base = LocalUrl.base_url()
+      actor = "#{base}/actors/#{native.id}"
+
+      ap = ActorSerializer.to_ap(native)
+
+      assert ap["id"] == actor
+      assert ap["url"] == actor
+      assert ap["inbox"] == "#{actor}/inbox"
+      assert ap["outbox"] == "#{actor}/outbox"
+      assert ap["followers"] == "#{actor}/followers"
+      assert ap["following"] == "#{actor}/following"
+      assert ap["featured"] == "#{actor}/collections/featured"
+      assert ap["publicKey"]["id"] == "#{actor}#main-key"
+      assert ap["publicKey"]["owner"] == actor
+      assert ap["endpoints"]["sharedInbox"] == "#{base}/inbox"
+    end
+
+    test "imported actor serializes with its original Pleroma URI + key" do
+      handle = "legacy_#{:erlang.unique_integer([:positive])}"
+      ap_url = "https://bassam.social/users/#{handle}"
+      {:ok, identity} = import_actor(handle, ap_url)
+
+      ap = ActorSerializer.to_ap(identity)
+
+      assert ap["id"] == ap_url
+      assert ap["url"] == ap_url
+      assert ap["inbox"] == "#{ap_url}/inbox"
+      assert ap["following"] == "#{ap_url}/following"
+      assert ap["featured"] == "#{ap_url}/collections/featured"
+      assert ap["publicKey"]["id"] == "#{ap_url}#main-key"
+      assert ap["publicKey"]["owner"] == ap_url
+      assert ap["publicKey"]["publicKeyPem"] == @pub
     end
   end
 end
