@@ -69,9 +69,22 @@ defmodule Hybridsocial.Media.MediaProxy do
       raise "media proxy: secret_key_base is not configured — refusing to sign with a default key"
   end
 
+  # Our own content — never proxy it. Covers both the app host and the
+  # configured media host (e.g. media.example.com backed by S3/R2), so
+  # media served from our own bucket is handed to the client directly
+  # instead of being round-tripped through the proxy. This also keeps
+  # actors/posts imported from a same-infra instance (whose media URLs
+  # point at our media host) served straight from the bucket.
   defp local_url?(url) do
-    local_host = URI.parse(HybridsocialWeb.Endpoint.url()).host
     remote_host = URI.parse(url).host
-    local_host == remote_host
+    local_host = URI.parse(HybridsocialWeb.Endpoint.url()).host
+
+    media_hostname =
+      case media_host() do
+        h when is_binary(h) -> URI.parse(h).host
+        _ -> nil
+      end
+
+    remote_host == local_host or (not is_nil(media_hostname) and remote_host == media_hostname)
   end
 end

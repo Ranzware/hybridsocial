@@ -122,13 +122,20 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DATABASE_URL: "ecto://${DB_USER:-hybridsocial}:${DB_PASSWORD:?}@postgresql/${DB_NAME:-hybridsocial_prod}"
       SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run 'sh docker/generate-secrets.sh .env' first}
+      # At-rest encryption master keys. Without these the app crashes on
+      # the first DM (message crypto) and the first write that encrypts a
+      # private key / 2FA secret / email. Generate with `openssl rand -base64 32`.
+      # LOSING EITHER MAKES THE CORRESPONDING DATA UNRECOVERABLE — back them up.
+      MESSAGE_ENCRYPTION_KEY: ${MESSAGE_ENCRYPTION_KEY:?Set MESSAGE_ENCRYPTION_KEY in .env}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY in .env}
       PHX_HOST: ${DOMAIN:?Set DOMAIN in .env}
       VALKEY_URL: "redis://:${VALKEY_PASSWORD:-}@valkey:6379"
       NATS_URL: "nats://nats:4222"
       OPENSEARCH_URL: "http://opensearch:9200"
       POOL_SIZE: ${POOL_SIZE:-10}
       UPLOADS_DIR: /app/uploads
-      # Email (optional)
+      # Email — Resend API (preferred) is checked first, then SMTP.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
@@ -142,6 +149,10 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       S3_ENDPOINT: ${S3_ENDPOINT:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY: ${R2_ACCESS_KEY:-}
+      R2_SECRET_KEY: ${R2_SECRET_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-}
       # Instance actor keys (for federation signing)
       INSTANCE_PUBLIC_KEY: ${INSTANCE_PUBLIC_KEY:-}
       INSTANCE_PRIVATE_KEY: ${INSTANCE_PRIVATE_KEY:-}
@@ -215,7 +226,7 @@ services:
       MEDIA_DOMAIN: ${MEDIA_DOMAIN:-}
       CROWDSEC_BOUNCER_CADDY_KEY: ${CROWDSEC_BOUNCER_CADDY_KEY:?Run 'sh docker/generate-secrets.sh .env' first}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
       - caddy_data:/data
       - caddy_config:/config
       - caddy_logs:/var/log/caddy
@@ -251,9 +262,13 @@ services:
       - caddy_logs:/var/log/caddy:ro
       - crowdsec_data:/var/lib/crowdsec/data
       - crowdsec_config:/etc/crowdsec
-      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro
-      - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro
-      - ./crowdsec/notifications/email.yaml:/etc/crowdsec/notifications/email.yaml:ro
+      - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro,z
+      - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro,z
+      # Email digest notifier — disabled until SMTP is configured. The
+      # plugin broker loads every file in notifications/, so an unwired
+      # (templated) config crashes crowdsec at boot. Re-add this mount +
+      # the profiles.yaml notifications block once SMTP_* are set.
+      # - ./crowdsec/notifications/email.yaml:/etc/crowdsec/notifications/email.yaml:ro,z
     healthcheck:
       test: ["CMD", "cscli", "lapi", "status"]
       interval: 30s

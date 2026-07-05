@@ -26,7 +26,7 @@
           <rect rx="6" width="28" height="28" fill="var(--color-primary)" />
           <text x="14" y="19.5" text-anchor="middle" fill="white" font-size="15" font-weight="700">H</text>
         </svg>
-        <span class="hero-logo-text">HybridSocial</span>
+        <span class="hero-logo-text">Bassam Social</span>
       </div>
 
       <h1 class="hero-headline">
@@ -34,7 +34,7 @@
       </h1>
 
       <p class="hero-description">
-        HybridSocial is a decentralized social platform.
+        Bassam Social is a decentralized social platform.
         Run your own server, control your data, and connect
         with others across the Fediverse.
       </p>

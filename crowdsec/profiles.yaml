@@ -14,8 +14,10 @@ filters:
 decisions:
   - type: ban
     duration: 4h
-notifications:
-  - email_default
+# Email digest disabled until SMTP is configured — re-add
+#   notifications:
+#     - email_default
+# once crowdsec/notifications/email.yaml is wired + SMTP_* set in .env.
 on_success: continue
 ---
 name: default_range_remediation
@@ -24,6 +26,8 @@ filters:
 decisions:
   - type: ban
     duration: 4h
-notifications:
-  - email_default
+# Email digest disabled until SMTP is configured — re-add
+#   notifications:
+#     - email_default
+# once crowdsec/notifications/email.yaml is wired + SMTP_* set in .env.
 on_success: continue

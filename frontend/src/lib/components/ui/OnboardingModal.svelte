@@ -527,7 +527,7 @@
   .field-input:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(0, 128, 128, 0.1));
+    box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(108, 62, 221, 0.1));
   }
   .field-textarea { resize: vertical; font-family: inherit; }
 

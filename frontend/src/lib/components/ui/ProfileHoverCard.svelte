@@ -297,7 +297,7 @@
   .hc-header-gradient {
     position: absolute;
     inset: 0;
-    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-soft, rgba(0,128,128,0.3)) 100%);
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-soft, rgba(108,62,221,0.3)) 100%);
   }
 
   /* ---- Avatar + Follow row ---- */

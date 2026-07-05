@@ -225,7 +225,7 @@
 </script>
 
 <svelte:head>
-  <title>Create account - HybridSocial</title>
+  <title>Create account - Bassam Social</title>
 </svelte:head>
 
 {#if success}
@@ -693,7 +693,7 @@
 
   .plan-selected {
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 1px var(--color-primary), 0 4px 12px rgba(0, 106, 105, 0.1);
+    box-shadow: 0 0 0 1px var(--color-primary), 0 4px 12px rgba(108, 62, 221, 0.1);
   }
 
   .plan-badge {

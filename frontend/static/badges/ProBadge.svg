@@ -15,7 +15,7 @@
     <linearGradient
        id="swatch61">
       <stop
-         style="stop-color:#197569;stop-opacity:1;"
+         style="stop-color:#6c3edd;stop-opacity:1;"
          offset="0"
          id="stop61" />
     </linearGradient>
@@ -50,7 +50,7 @@
          fill-rule="evenodd"
          d="m 16.969658,52.139128 c -0.252059,-0.252057 -0.32437,-0.636543 -0.245323,-1.141025 -0.412618,-0.300827 -0.633357,-0.623831 -0.633357,-0.980295 0,-0.356464 0.220739,-0.679468 0.633357,-0.980296 -0.07905,-0.504482 -0.0068,-0.888967 0.245323,-1.141024 0.252057,-0.252058 0.636542,-0.32437 1.141025,-0.245323 0.300827,-0.412618 0.623831,-0.633357 0.980295,-0.633357 0.356464,0 0.679468,0.220739 0.980296,0.633357 0.504482,-0.07905 0.888967,-0.0068 1.141024,0.245323 0.252059,0.252057 0.32437,0.636542 0.245323,1.141024 0.412618,0.300828 0.633357,0.623832 0.633357,0.980296 0,0.356464 -0.220739,0.679468 -0.633357,0.980295 0.07905,0.504482 0.0068,0.888968 -0.245323,1.141025 -0.252057,0.252058 -0.636542,0.32437 -1.141024,0.245323 -0.300828,0.412618 -0.623832,0.633357 -0.980296,0.633357 -0.356464,0 -0.679468,-0.220739 -0.980295,-0.633357 -0.504483,0.07905 -0.888968,0.0068 -1.141025,-0.245323 z"
          id="path1-6"
-         style="display:inline;fill:#156960;fill-opacity:1;stroke-width:0.272727" />
+         style="display:inline;fill:#5a2fc4;fill-opacity:1;stroke-width:0.272727" />
       <text
          xml:space="preserve"
          style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:4.44879px;font-family:'Nimbus Sans';-inkscape-font-specification:'Nimbus Sans Bold';writing-mode:lr-tb;direction:ltr;display:inline;fill:#ffffff;fill-opacity:1;stroke:none;stroke-width:0.0953307;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"

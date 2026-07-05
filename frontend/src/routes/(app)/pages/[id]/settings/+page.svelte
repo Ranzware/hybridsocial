@@ -181,7 +181,7 @@
 </script>
 
 <svelte:head>
-  <title>{displayName ? `${displayName} — Settings` : 'Page settings'} — HybridSocial</title>
+  <title>{displayName ? `${displayName} — Settings` : 'Page settings'} — Bassam Social</title>
 </svelte:head>
 
 <div class="settings-page">

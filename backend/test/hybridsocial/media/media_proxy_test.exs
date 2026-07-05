@@ -31,6 +31,18 @@ defmodule Hybridsocial.Media.MediaProxyTest do
       assert MediaProxy.url(local) == local
     end
 
+    test "passes configured media-host URLs through unchanged (own bucket, not proxied)" do
+      prev = Application.get_env(:hybridsocial, :media_host)
+      Application.put_env(:hybridsocial, :media_host, "https://media.test.example")
+      on_exit(fn -> Application.put_env(:hybridsocial, :media_host, prev) end)
+
+      own = "https://media.test.example/abc123.jpg"
+      foreign = "https://mastodon.example/img.jpg"
+
+      assert MediaProxy.url(own) == own
+      assert String.contains?(MediaProxy.url(foreign), "/proxy/media/")
+    end
+
     test "round-trips: verify_url decodes what url/1 produced" do
       remote = "https://mastodon.example/img/2.png"
       proxied = MediaProxy.url(remote)

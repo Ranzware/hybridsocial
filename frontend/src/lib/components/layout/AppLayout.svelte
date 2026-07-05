@@ -16,7 +16,9 @@
   } = $props();
 
   const hideRightSidebarPaths = ['/settings', '/messages', '/admin', '/help'];
-  const hideLeftSidebarPaths = ['/settings'];
+  // Settings keeps the primary app sidebar visible now, so it reads as a
+  // section of the app (with a way back) rather than a separate screen.
+  const hideLeftSidebarPaths: string[] = [];
   const fullWidthPaths = ['/messages', '/admin', '/settings', '/help'];
 
   let showRightSidebar = $derived(

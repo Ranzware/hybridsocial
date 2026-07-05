@@ -1951,14 +1951,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 16px rgba(0, 106, 105, 0.3);
+    box-shadow: 0 4px 16px rgba(108, 62, 221, 0.3);
     transition: transform 150ms ease, box-shadow 150ms ease;
     z-index: var(--z-sticky);
   }
 
   .fab:hover {
     transform: scale(1.05);
-    box-shadow: 0 6px 24px rgba(0, 106, 105, 0.4);
+    box-shadow: 0 6px 24px rgba(108, 62, 221, 0.4);
   }
 
   .fab:focus-visible {
@@ -2569,7 +2569,7 @@
   .schedule-input:focus {
     outline: none;
     border-color: var(--color-primary);
-    box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(0, 128, 128, 0.1));
+    box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(108, 62, 221, 0.1));
   }
 
   .schedule-preview {
@@ -2972,7 +2972,7 @@
     width: 32px;
     height: 32px;
     border-radius: 9999px;
-    background: var(--color-primary, #006a69);
+    background: var(--color-primary, #6c3edd);
     color: #fff;
     display: flex;
     align-items: center;

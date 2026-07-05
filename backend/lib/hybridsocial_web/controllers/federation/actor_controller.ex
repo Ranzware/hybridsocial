@@ -8,6 +8,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
   alias Hybridsocial.Accounts.Identity
   alias Hybridsocial.Social.Follow
   alias Hybridsocial.Federation.ActorSerializer
+  alias Hybridsocial.Federation.LocalUrl
   alias Hybridsocial.Federation.OutboxSerializer
 
   # ActivityPub spec permits either of these two media types for
@@ -17,24 +18,67 @@ defmodule HybridsocialWeb.Federation.ActorController do
   @ap_content_type "application/activity+json"
   @ld_content_type ~s(application/ld+json; profile="https://www.w3.org/ns/activitystreams")
 
+  # Resolve the actor for a request. Native actors are addressed by UUID
+  # at `/actors/:id`. Actors imported from a retired Pleroma/Rebased
+  # instance are addressed at their original `/users/:nickname` path, and
+  # are only served there when a LOCAL identity actually advertises that
+  # exact URL — so a native user (who lives at `/actors/<uuid>`) can't be
+  # dereferenced under `/users/`.
+  defp resolve_identity(%{"id" => id}), do: Accounts.get_identity(id)
+
+  defp resolve_identity(%{"nickname" => nickname}) do
+    case Accounts.get_identity_by_handle(nickname) do
+      %Identity{} = identity ->
+        expected = "#{HybridsocialWeb.Endpoint.url()}/users/#{nickname}"
+
+        if LocalUrl.local_identity?(identity) and identity.ap_actor_url == expected,
+          do: identity,
+          else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp resolve_identity(_), do: nil
+
+  defp not_found(conn) do
+    conn |> put_status(:not_found) |> json(%{error: "Actor not found"})
+  end
+
   # sobelow_skip ["XSS.ContentType"]
   # Safe: negotiated_content_type/1 only returns one of two module
   # attributes (@ap_content_type, @ld_content_type) — no user data
   # reaches the header.
-  def show(conn, %{"id" => id}) do
-    case Accounts.get_identity(id) do
+  def show(conn, params) do
+    case resolve_identity(params) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Actor not found"})
+        not_found(conn)
 
       identity ->
-        actor = ActorSerializer.to_ap(identity)
+        # A browser hitting the canonical actor URL should land on the web
+        # profile, not raw ActivityPub JSON — matches how Pleroma/Mastodon
+        # negotiate. Fediverse servers (activity+json / ld+json) still get
+        # the actor document.
+        if prefers_html?(conn) do
+          redirect(conn, to: "/@" <> identity.handle)
+        else
+          actor = ActorSerializer.to_ap(identity)
 
-        conn
-        |> put_resp_content_type(negotiated_content_type(conn))
-        |> json(actor)
+          conn
+          |> put_resp_content_type(negotiated_content_type(conn))
+          |> json(actor)
+        end
     end
+  end
+
+  defp prefers_html?(conn) do
+    accept =
+      conn |> Plug.Conn.get_req_header("accept") |> List.first() |> to_string() |> String.downcase()
+
+    String.contains?(accept, "text/html") and
+      not String.contains?(accept, "application/activity+json") and
+      not String.contains?(accept, "application/ld+json")
   end
 
   # Picks the content type to emit based on the Accept header. Falls
@@ -51,17 +95,26 @@ defmodule HybridsocialWeb.Federation.ActorController do
     end
   end
 
+  # The self-referential collection `id` must match what the actor
+  # document advertises, so imported actors report their stored URL
+  # while native actors keep the computed `/actors/<uuid>/...` form.
+  defp collection_url(identity, stored, suffix) do
+    stored || "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}#{suffix}"
+  end
+
+  defp actor_url_for(identity, base_url) do
+    identity.ap_actor_url || "#{base_url}/actors/#{identity.id}"
+  end
+
   # sobelow_skip ["XSS.ContentType"]
-  def followers(conn, %{"id" => id}) do
-    case Accounts.get_identity(id) do
+  def followers(conn, params) do
+    case resolve_identity(params) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Actor not found"})
+        not_found(conn)
 
       identity ->
         base_url = HybridsocialWeb.Endpoint.url()
-        collection_url = "#{base_url}/actors/#{identity.id}/followers"
+        collection_url = collection_url(identity, identity.followers_url, "/followers")
 
         follower_identities =
           Follow
@@ -70,14 +123,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
           |> select([f, i], i)
           |> Repo.all()
 
-        follower_urls =
-          Enum.map(follower_identities, fn i ->
-            if i.ap_actor_url && !String.starts_with?(i.ap_actor_url, base_url) do
-              i.ap_actor_url
-            else
-              "#{base_url}/actors/#{i.id}"
-            end
-          end)
+        follower_urls = Enum.map(follower_identities, &actor_url_for(&1, base_url))
 
         collection = %{
           "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
@@ -94,16 +140,14 @@ defmodule HybridsocialWeb.Federation.ActorController do
   end
 
   # sobelow_skip ["XSS.ContentType"]
-  def following(conn, %{"id" => id}) do
-    case Accounts.get_identity(id) do
+  def following(conn, params) do
+    case resolve_identity(params) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Actor not found"})
+        not_found(conn)
 
       identity ->
         base_url = HybridsocialWeb.Endpoint.url()
-        collection_url = "#{base_url}/actors/#{identity.id}/following"
+        collection_url = collection_url(identity, identity.following_url, "/following")
 
         following_identities =
           Follow
@@ -112,14 +156,7 @@ defmodule HybridsocialWeb.Federation.ActorController do
           |> select([f, i], i)
           |> Repo.all()
 
-        following_urls =
-          Enum.map(following_identities, fn i ->
-            if i.ap_actor_url && !String.starts_with?(i.ap_actor_url, base_url) do
-              i.ap_actor_url
-            else
-              "#{base_url}/actors/#{i.id}"
-            end
-          end)
+        following_urls = Enum.map(following_identities, &actor_url_for(&1, base_url))
 
         collection = %{
           "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
@@ -135,42 +172,46 @@ defmodule HybridsocialWeb.Federation.ActorController do
     end
   end
 
-  def featured(conn, %{"id" => id}) do
-    base_url = HybridsocialWeb.Endpoint.url()
+  def featured(conn, params) do
+    case resolve_identity(params) do
+      nil ->
+        not_found(conn)
 
-    # Use the schema (not a raw "posts" string source) so Ecto casts
-    # the string-form UUID to binary for us. The raw-source query
-    # crashed with `Postgrex expected a binary of 16 bytes` when
-    # called via the federation route — Mastodon hits this endpoint
-    # on every actor lookup.
-    pinned =
-      from(p in Hybridsocial.Social.Post,
-        where: p.identity_id == ^id and p.is_pinned == true and is_nil(p.deleted_at),
-        select: p.id,
-        order_by: [desc: p.inserted_at]
-      )
-      |> Repo.all()
+      identity ->
+        base_url = HybridsocialWeb.Endpoint.url()
 
-    items = Enum.map(pinned, fn post_id -> "#{base_url}/posts/#{post_id}" end)
+        # Use the schema (not a raw "posts" string source) so Ecto casts
+        # the string-form UUID to binary for us. The raw-source query
+        # crashed with `Postgrex expected a binary of 16 bytes` when
+        # called via the federation route — Mastodon hits this endpoint
+        # on every actor lookup.
+        pinned =
+          from(p in Hybridsocial.Social.Post,
+            where: p.identity_id == ^identity.id and p.is_pinned == true and is_nil(p.deleted_at),
+            select: p.id,
+            order_by: [desc: p.inserted_at]
+          )
+          |> Repo.all()
 
-    conn
-    |> put_resp_content_type(@ap_content_type)
-    |> json(%{
-      "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
-      "id" => "#{base_url}/actors/#{id}/collections/featured",
-      "type" => "OrderedCollection",
-      "totalItems" => length(items),
-      "orderedItems" => items
-    })
+        items = Enum.map(pinned, fn post_id -> "#{base_url}/posts/#{post_id}" end)
+
+        conn
+        |> put_resp_content_type(@ap_content_type)
+        |> json(%{
+          "@context" => ["https://www.w3.org/ns/activitystreams", "https://w3id.org/security/v1"],
+          "id" => collection_url(identity, identity.featured_url, "/collections/featured"),
+          "type" => "OrderedCollection",
+          "totalItems" => length(items),
+          "orderedItems" => items
+        })
+    end
   end
 
   # sobelow_skip ["XSS.ContentType"]
-  def outbox(conn, %{"id" => id} = params) do
-    case Accounts.get_identity(id) do
+  def outbox(conn, params) do
+    case resolve_identity(params) do
       nil ->
-        conn
-        |> put_status(:not_found)
-        |> json(%{error: "Actor not found"})
+        not_found(conn)
 
       identity ->
         page =

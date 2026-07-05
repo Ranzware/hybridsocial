@@ -32,7 +32,7 @@ defmodule Hybridsocial.Groups.Group do
     # Legacy fields kept for backwards compat during migration
     field :ap_actor_url, :string
     field :public_key, :string
-    field :private_key, :string
+    field :private_key, Hybridsocial.Crypto.EncryptedBinary, context: "group.private_key"
 
     belongs_to :creator, Hybridsocial.Accounts.Identity, foreign_key: :created_by
 

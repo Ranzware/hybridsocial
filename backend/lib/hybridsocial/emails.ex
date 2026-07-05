@@ -32,7 +32,7 @@ defmodule Hybridsocial.Emails do
     assigns = %{
       "instance_name" => instance_name(),
       "user" => user_assigns(user),
-      "reset_url" => "#{base_url()}/auth/reset-password?token=#{user.reset_token}"
+      "reset_url" => "#{base_url()}/reset-password?token=#{user.reset_token}"
     }
 
     render("password_reset", user, assigns)

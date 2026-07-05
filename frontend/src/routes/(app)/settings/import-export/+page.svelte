@@ -20,8 +20,43 @@
   let importType = $state('follows');
   let fileInput: HTMLInputElement | undefined = $state();
 
-  onMount(async () => {
-    await loadExports();
+  // While any export is still being generated we poll so the row flips
+  // to "ready" (and offers a download) on its own, instead of the user
+  // having to reload the page.
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollCount = 0;
+
+  function hasPending(): boolean {
+    return exports.some((e) => e.status === 'pending' || e.status === 'processing');
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function ensurePolling() {
+    if (pollTimer || !hasPending()) return;
+    pollCount = 0;
+    pollTimer = setInterval(async () => {
+      pollCount++;
+      const wasPending = new Set(
+        exports.filter((e) => e.status === 'pending' || e.status === 'processing').map((e) => e.id),
+      );
+      await loadExports();
+      if (exports.some((e) => wasPending.has(e.id) && e.status === 'completed')) {
+        addToast('Your export is ready to download', 'success');
+      }
+      // Stop once nothing is in flight, or after ~3 min as a backstop.
+      if (!hasPending() || pollCount > 45) stopPolling();
+    }, 4000);
+  }
+
+  onMount(() => {
+    loadExports().then(ensurePolling);
+    return () => stopPolling();
   });
 
   async function loadExports() {
@@ -41,6 +76,7 @@
       const res = await api.post<ExportEntry>('/api/v1/export');
       exports = [res, ...exports];
       addToast('Export started — it will be ready to download shortly', 'success');
+      ensurePolling();
     } catch {
       addToast('Failed to start export', 'error');
     } finally {
@@ -116,10 +152,6 @@
 </script>
 
 <div class="stitch-settings">
-  <div class="stitch-settings-header">
-    <h1 class="stitch-settings-title">Import & Export</h1>
-    <p class="stitch-settings-subtitle">Export your data or import from another account</p>
-  </div>
 
   <!-- Export -->
   <section class="stitch-section">
@@ -243,25 +275,6 @@
 <style>
   .stitch-settings {
     max-width: 720px;
-  }
-
-  .stitch-settings-header {
-    margin-block-end: 32px;
-  }
-
-  .stitch-settings-title {
-    font-family: 'Manrope', var(--font-sans);
-    font-size: 1.875rem;
-    font-weight: 800;
-    letter-spacing: -0.025em;
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .stitch-settings-subtitle {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-block-start: 4px;
   }
 
   .stitch-section {
@@ -475,10 +488,6 @@
   }
 
   @media (max-width: 640px) {
-    .stitch-settings-title {
-      font-size: 1.5rem;
-    }
-
     .stitch-form {
       padding: 20px;
     }

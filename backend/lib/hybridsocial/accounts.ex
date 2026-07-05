@@ -85,8 +85,11 @@ defmodule Hybridsocial.Accounts do
     end)
   end
 
-  defp remote_actor?(%Identity{ap_actor_url: url}) when is_binary(url) do
-    not Hybridsocial.Federation.LocalUrl.local_actor_url?(url)
+  # Authoritative via `is_local` — an imported legacy actor has a
+  # foreign-shaped URL but is local, so the `/actors/` URL heuristic
+  # would wrongly flag it remote.
+  defp remote_actor?(%Identity{} = identity) do
+    not Hybridsocial.Federation.LocalUrl.local_identity?(identity)
   end
 
   defp remote_actor?(_), do: false
@@ -121,7 +124,8 @@ defmodule Hybridsocial.Accounts do
   # --- User registration ---
 
   def register_user(attrs) do
-    with :ok <- check_pow(attrs),
+    with :ok <- check_registration_open(),
+         :ok <- check_pow(attrs),
          :ok <- check_turnstile(attrs),
          :ok <- check_email_domain(attrs),
          :ok <- check_handle_available(attrs),
@@ -310,6 +314,15 @@ defmodule Hybridsocial.Accounts do
     end
   end
 
+  # Backend-authoritative registration gate. "closed" rejects all signups
+  # (the frontend also hides the form, but that isn't enforcement).
+  defp check_registration_open do
+    case Hybridsocial.Config.get("registration_mode", "open") do
+      "closed" -> {:error, :registration_closed}
+      _ -> :ok
+    end
+  end
+
   defp check_invite_code(attrs) do
     reg_mode = Hybridsocial.Config.get("registration_mode", "open")
 
@@ -409,10 +422,11 @@ defmodule Hybridsocial.Accounts do
   # --- Authentication ---
 
   def get_user_by_email(email) do
-    email = String.downcase(email)
+    # Look up by the blind index — the email column itself is encrypted.
+    hash = Hybridsocial.Crypto.blind_index(email, "user.email")
 
     User
-    |> where([u], u.email == ^email)
+    |> where([u], u.email_hash == ^hash)
     |> Repo.one()
     |> case do
       nil -> nil
@@ -841,8 +855,16 @@ defmodule Hybridsocial.Accounts do
         {:error, :invalid_token}
 
       user ->
-        # Check expiry (1 hour)
-        if DateTime.diff(DateTime.utc_now(), user.reset_token_at) > 3600 do
+        # Token lifetime is configurable (`password_reset_ttl_seconds`,
+        # default 1 hour) so an onboarding/migration batch can issue
+        # longer-lived links without weakening day-to-day resets.
+        ttl =
+          case Hybridsocial.Config.get("password_reset_ttl_seconds", 3600) do
+            n when is_integer(n) and n > 0 -> n
+            _ -> 3600
+          end
+
+        if DateTime.diff(DateTime.utc_now(), user.reset_token_at) > ttl do
           {:error, :token_expired}
         else
           result =

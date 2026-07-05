@@ -37,6 +37,11 @@ config :hybridsocial,
        :message_encryption_key,
        "test-only-not-for-production-32byte!!!!"
 
+# Fixed at-rest field-encryption key (private keys, 2FA secrets, emails).
+config :hybridsocial,
+       :data_encryption_key,
+       "test-only-not-for-production-data-key!!!"
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

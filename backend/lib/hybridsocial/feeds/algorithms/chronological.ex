@@ -67,6 +67,7 @@ defmodule Hybridsocial.Feeds.Algorithms.Chronological do
           p.id in subquery(tagged_post_ids)
       )
       |> where([p], is_nil(p.deleted_at))
+      |> where([p], not is_nil(p.published_at))
       |> where([p], is_nil(p.parent_id))
       |> apply_post_cursor(cursor)
       |> Visibility.apply_post_visibility(identity_id)

@@ -112,7 +112,14 @@ defmodule Hybridsocial.Federation.Publisher do
       {:error, "missing_private_key"}
     else
       body = Jason.encode!(activity)
-      key_id = "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}#main-key"
+      # Use the identity's stored ActivityPub URL so imported actors sign
+      # with the keyId remote servers already have cached. Native
+      # identities store the `/actors/<uuid>` form, so this is unchanged
+      # for them.
+      actor_url =
+        identity.ap_actor_url || "#{HybridsocialWeb.Endpoint.url()}/actors/#{identity.id}"
+
+      key_id = "#{actor_url}#main-key"
 
       sig_headers =
         HTTPSignature.sign(

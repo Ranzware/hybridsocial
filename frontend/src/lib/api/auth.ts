@@ -53,8 +53,16 @@ export function requestPasswordReset(email: string): Promise<void> {
   return api.post('/api/v1/auth/password/reset', { email });
 }
 
-export function confirmPasswordReset(token: string, password: string): Promise<void> {
-  return api.post('/api/v1/auth/password/confirm', { token, password });
+export function confirmPasswordReset(
+  token: string,
+  password: string,
+  passwordConfirmation: string,
+): Promise<void> {
+  return api.post('/api/v1/auth/password/change', {
+    token,
+    password,
+    password_confirmation: passwordConfirmation,
+  });
 }
 
 export function changePassword(currentPassword: string, newPassword: string): Promise<void> {

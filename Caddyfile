@@ -27,51 +27,53 @@
 		api_key {$CROWDSEC_BOUNCER_CADDY_KEY}
 		ticker_interval 15s
 	}
-}
 
-# ---------- Media domain (no WAF) ----------
-# Only mounted when MEDIA_DOMAIN is set; defaults to an unreachable
-# placeholder so Caddy doesn't bind a wildcard site block.
-{$MEDIA_DOMAIN:media.invalid} {
-	header {
-		X-Content-Type-Options nosniff
-		Content-Security-Policy "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'none'; script-src 'none'"
-		X-Frame-Options DENY
-		-Server
-		-Set-Cookie
-	}
-
-	handle /uploads/* {
-		reverse_proxy backend:4000
-	}
-
-	handle {
-		respond "Not Found" 404
-	}
-
-	encode gzip zstd
-
-	log {
-		output file /var/log/caddy/media-access.log {
-			roll_size 100mb
-			roll_keep 5
+	# Real client IP behind Cloudflare. The caddy-cloudflare-ip module
+	# fetches CF's published edge ranges (refreshed every 12h) and marks
+	# them trusted; the real visitor IP is then read from CF-Connecting-IP.
+	# This feeds Caddy's client_ip to the CrowdSec bouncer, Coraza, logs,
+	# and the app — so CrowdSec bans the attacker, not a Cloudflare edge.
+	# Safe when DNS-only too: the header is only honored from these
+	# trusted source IPs, so a direct client can't spoof it.
+	servers {
+		trusted_proxies cloudflare {
+			interval 12h
+			timeout 15s
 		}
-		format json
+		client_ip_headers Cf-Connecting-Ip
 	}
 }
+
 
 # ---------- Main domain ----------
 {$DOMAIN:localhost} {
+	# Behind Cloudflare: CF terminates public TLS and connects to this
+	# origin over HTTPS. Self-signed is fine with CF SSL mode "Full" (CF
+	# doesn't validate the origin cert), so no Let's Encrypt/ACME is needed.
+	tls internal
+
 	# WebSocket streaming — bypass Coraza (response-body scanning
 	# breaks long-lived connections). CrowdSec still applies via
 	# the global directive order.
 	@streaming path /api/v1/streaming/*
 	handle @streaming {
 		reverse_proxy backend:4000 {
+			# SSE must stream, not buffer. Without flush_interval -1 Caddy
+			# buffers the response, so the client's EventSource never sees
+			# the headers/heartbeats, times out, and reconnect-loops.
+			flush_interval -1
 			transport http {
 				read_timeout 0
 			}
 		}
+	}
+
+	# Older self-service reset emails linked to /auth/reset-password, but
+	# the SvelteKit route is /reset-password (so those links 404). Redirect
+	# them — preserving the ?token= query — so already-sent emails work.
+	@legacy_reset path /auth/reset-password
+	handle @legacy_reset {
+		redir * /reset-password?{query} 302
 	}
 
 	# Everything else gets the full WAF stack.

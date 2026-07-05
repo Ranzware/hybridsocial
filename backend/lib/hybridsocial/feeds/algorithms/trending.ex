@@ -89,6 +89,7 @@ defmodule Hybridsocial.Feeds.Algorithms.Trending do
       Post
       |> where([p], p.visibility == "public")
       |> where([p], is_nil(p.deleted_at))
+      |> where([p], not is_nil(p.published_at))
       |> where([p], is_nil(p.parent_id))
       |> where([p], p.inserted_at >= ^cutoff)
       |> where([p], p.reaction_count + p.boost_count + p.reply_count >= 1)

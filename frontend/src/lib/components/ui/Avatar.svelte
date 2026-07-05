@@ -6,7 +6,7 @@
   }: {
     src?: string | null;
     name?: string;
-    size?: 'sm' | 'md' | 'lg' | 'xl';
+    size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   } = $props();
 
   let initials = $derived(
@@ -62,6 +62,12 @@
     width: 80px;
     height: 80px;
     font-size: var(--text-2xl);
+  }
+
+  .avatar-2xl {
+    width: 104px;
+    height: 104px;
+    font-size: var(--text-3xl);
   }
 
   .avatar-img {

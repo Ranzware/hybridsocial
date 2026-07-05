@@ -71,5 +71,11 @@ config :hybridsocial,
        :message_encryption_key,
        "dev-only-not-for-production-32byte-key!!"
 
+# At-rest field-encryption key (dev-only fixed value; production loads from
+# DATA_ENCRYPTION_KEY env var in runtime.exs).
+config :hybridsocial,
+       :data_encryption_key,
+       "dev-only-not-for-production-data-enc-key!"
+
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime

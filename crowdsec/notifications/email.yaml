@@ -25,14 +25,17 @@ max_retry: 3
 timeout: 20s
 
 # ---- SMTP connection ----
-smtp_host: "{{ env "SMTP_HOST" }}"
-smtp_port: {{ env "SMTP_PORT" | default 587 }}
-smtp_username: "{{ env "SMTP_USER" }}"
-smtp_password: "{{ env "SMTP_PASSWORD" }}"
-sender_email: "{{ env "MAIL_FROM" }}"
+# Templated values use SINGLE quotes so the inner double quotes stay valid
+# YAML (double-quoting both broke the parse). Port is a plain int — the
+# plugin's config field is an int, not a string.
+smtp_host: '{{ env "SMTP_HOST" }}'
+smtp_port: 587
+smtp_username: '{{ env "SMTP_USER" }}'
+smtp_password: '{{ env "SMTP_PASSWORD" }}'
+sender_email: '{{ env "MAIL_FROM" }}'
 sender_name: "HybridSocial Security"
 receiver_emails:
-  - "{{ env "CROWDSEC_NOTIFY_EMAIL_TO" }}"
+  - '{{ env "CROWDSEC_NOTIFY_EMAIL_TO" }}'
 encryption_type: "starttls"
 auth_type: "login"
 

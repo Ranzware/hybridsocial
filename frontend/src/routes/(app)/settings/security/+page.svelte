@@ -6,6 +6,7 @@
   import { authStore, setUser } from '$lib/stores/auth.js';
   import { addToast } from '$lib/stores/toast.js';
   import Spinner from '$lib/components/ui/Spinner.svelte';
+  import Modal from '$lib/components/ui/Modal.svelte';
   import QRCode from 'qrcode';
 
   import { api } from '$lib/api/client.js';
@@ -127,7 +128,9 @@
   async function loadKeys() {
     try {
       securityKeys = await api.get<WebauthnCred[]>('/api/v1/auth/webauthn/credentials');
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your security keys', 'error');
+    }
     finally { keysLoading = false; }
   }
 
@@ -181,13 +184,31 @@
     } finally { keyRegistering = false; }
   }
 
-  async function deleteKey(id: string) {
+  // Removing a security key removes an authentication factor, so confirm
+  // it explicitly rather than deleting on a single click.
+  let keyToDelete = $state<WebauthnCred | null>(null);
+  let showDeleteKeyModal = $state(false);
+  let keyDeleting = $state(false);
+
+  function askDeleteKey(key: WebauthnCred) {
+    keyToDelete = key;
+    showDeleteKeyModal = true;
+  }
+
+  async function confirmDeleteKey() {
+    if (!keyToDelete || keyDeleting) return;
+    keyDeleting = true;
+    const id = keyToDelete.id;
     try {
       await api.delete(`/api/v1/auth/webauthn/credentials/${id}`);
       securityKeys = securityKeys.filter(k => k.id !== id);
       addToast('Security key removed', 'success');
+      showDeleteKeyModal = false;
+      keyToDelete = null;
     } catch {
       addToast('Failed to remove key', 'error');
+    } finally {
+      keyDeleting = false;
     }
   }
 
@@ -308,12 +329,6 @@
 </script>
 
 <div class="stitch-settings">
-  <!-- Page header -->
-  <div class="stitch-settings-header">
-    <h1 class="stitch-settings-title">Account Settings</h1>
-    <p class="stitch-settings-subtitle">Manage your profile, preferences, and account details</p>
-  </div>
-
   <!-- Change Password -->
   <section class="stitch-section">
     <div class="stitch-section-heading">
@@ -545,7 +560,7 @@
                     </span>
                   </div>
                 </div>
-                <button type="button" class="key-remove" onclick={() => deleteKey(key.id)}>
+                <button type="button" class="key-remove" onclick={() => askDeleteKey(key)} aria-label="Remove {key.name}">
                   <span class="material-symbols-outlined" style="font-size: 18px">delete</span>
                 </button>
               </div>
@@ -693,7 +708,7 @@
         <h2 class="stitch-section-title">External link warning</h2>
         <p class="stitch-section-desc">
           Pop a confirmation dialog before opening links that lead off
-          HybridSocial. Helps catch typosquatted phishing domains
+          Bassam Social. Helps catch typosquatted phishing domains
           before you visit them.
         </p>
       </div>
@@ -768,6 +783,21 @@
   </section>
 
 </div>
+
+<Modal bind:open={showDeleteKeyModal} title="Remove this security key?" onclose={() => { keyToDelete = null; }}>
+  {#if keyToDelete}
+    <p class="confirm-message">
+      <strong>{keyToDelete.name}</strong> will no longer be able to sign in to your account. Make sure you have another way to log in before removing it.
+    </p>
+    <div class="confirm-actions">
+      <button type="button" class="stitch-btn-ghost" onclick={() => (showDeleteKeyModal = false)}>Cancel</button>
+      <button type="button" class="stitch-btn-danger" onclick={confirmDeleteKey} disabled={keyDeleting}>
+        {#if keyDeleting}<Spinner size={14} color="#fff" />{/if}
+        Remove key
+      </button>
+    </div>
+  {/if}
+</Modal>
 
 <style>
   /* ---- Recovery code ---- */
@@ -937,23 +967,17 @@
     max-width: 720px;
   }
 
-  .stitch-settings-header {
-    margin-block-end: 32px;
+  .confirm-message {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    margin-block-end: var(--space-4);
   }
 
-  .stitch-settings-title {
-    font-family: 'Manrope', var(--font-sans);
-    font-size: 1.875rem;
-    font-weight: 800;
-    letter-spacing: -0.025em;
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .stitch-settings-subtitle {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-block-start: 4px;
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
   }
 
   .stitch-section {
@@ -1247,10 +1271,6 @@
 
   /* ---- Responsive ---- */
   @media (max-width: 640px) {
-    .stitch-settings-title {
-      font-size: 1.5rem;
-    }
-
     .stitch-form {
       padding: 20px;
     }

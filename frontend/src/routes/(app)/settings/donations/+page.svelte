@@ -37,7 +37,9 @@
   onMount(async () => {
     try {
       addresses = await api.get<CryptoAddr[]>('/api/v1/accounts/crypto_addresses');
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your wallet addresses', 'error');
+    }
     finally { loading = false; }
   });
 
@@ -71,11 +73,10 @@
 </script>
 
 <svelte:head>
-  <title>Donation Settings - HybridSocial</title>
+  <title>Donation Settings - Bassam Social</title>
 </svelte:head>
 
 <div class="donations-page">
-  <h1 class="stitch-title">Crypto Donations</h1>
   <p class="stitch-desc">Add your wallet addresses so people can donate to you. These will appear on your profile.</p>
 
   <div class="stitch-card">
@@ -133,7 +134,6 @@
 
 <style>
   .donations-page { max-width: 600px; }
-  .stitch-title { font-size: var(--text-2xl); font-weight: 700; margin-block-end: var(--space-2); }
   .stitch-desc { font-size: var(--text-sm); color: var(--color-text-secondary); margin-block-end: var(--space-6); }
   .stitch-card { background: var(--color-surface-raised, white); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5); margin-block-end: var(--space-4); }
   .stitch-section-title { font-size: var(--text-base); font-weight: 600; margin-block-end: var(--space-4); }
@@ -149,7 +149,7 @@
   .addr-list { display: flex; flex-direction: column; gap: 8px; }
   .addr-item { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; background: var(--color-surface); border-radius: 10px; position: relative; }
   .addr-coin { display: flex; align-items: center; gap: 6px; }
-  .coin-badge { font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--color-primary-soft, rgba(0,128,128,0.1)); color: var(--color-primary); }
+  .coin-badge { font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; background: var(--color-primary-soft, rgba(108,62,221,0.1)); color: var(--color-primary); }
   .coin-name { font-size: 0.8125rem; font-weight: 600; }
   .addr-value { font-family: monospace; font-size: 0.75rem; color: var(--color-text-secondary); word-break: break-all; flex: 1; }
   .addr-label { font-size: 0.75rem; color: var(--color-text-tertiary); }

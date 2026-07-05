@@ -26,7 +26,7 @@
           <rect rx="6" width="28" height="28" fill="var(--color-primary)" />
           <text x="14" y="19.5" text-anchor="middle" fill="white" font-size="15" font-weight="700">H</text>
         </svg>
-        <span>HybridSocial</span>
+        <span>Bassam Social</span>
       </a>
       <nav class="public-header-nav">
         <a href="/login" class="header-login-btn">Sign in</a>
@@ -68,7 +68,7 @@
         <a href="/legal/privacy">Privacy</a>
         <a href="/legal/terms">Terms</a>
       </div>
-      <div class="footer-copy">&copy; {new Date().getFullYear()} HybridSocial</div>
+      <div class="footer-copy">&copy; {new Date().getFullYear()} Bassam Social</div>
     </div>
   </footer>
 </div>

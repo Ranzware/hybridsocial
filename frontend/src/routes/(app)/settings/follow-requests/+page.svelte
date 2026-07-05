@@ -63,11 +63,6 @@
 </script>
 
 <div class="stitch-settings">
-  <div class="stitch-settings-header">
-    <h1 class="stitch-settings-title">Follow Requests</h1>
-    <p class="stitch-settings-subtitle">Approve or reject pending follow requests</p>
-  </div>
-
   <section class="stitch-section">
     <div class="stitch-section-heading">
       <span class="stitch-section-icon" aria-hidden="true">
@@ -147,25 +142,6 @@
 <style>
   .stitch-settings {
     max-width: 720px;
-  }
-
-  .stitch-settings-header {
-    margin-block-end: 32px;
-  }
-
-  .stitch-settings-title {
-    font-family: 'Manrope', var(--font-sans);
-    font-size: 1.875rem;
-    font-weight: 800;
-    letter-spacing: -0.025em;
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .stitch-settings-subtitle {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-block-start: 4px;
   }
 
   .stitch-section {
@@ -348,10 +324,6 @@
   }
 
   @media (max-width: 640px) {
-    .stitch-settings-title {
-      font-size: 1.5rem;
-    }
-
     .stitch-form {
       padding: 20px;
     }

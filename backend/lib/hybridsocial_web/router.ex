@@ -456,6 +456,7 @@ defmodule HybridsocialWeb.Router do
     put "/:id/messages/:mid", ConversationController, :edit_message
     delete "/:id/messages/:mid", ConversationController, :delete_message
     post "/:id/read", ConversationController, :mark_read
+    post "/:id/typing", ConversationController, :typing
     patch "/:id/settings", ConversationController, :update_settings
     post "/:id/accept", ConversationController, :accept
     delete "/:id/decline", ConversationController, :decline
@@ -1039,6 +1040,23 @@ defmodule HybridsocialWeb.Router do
     get "/:id/collections/featured", ActorController, :featured
     get "/:id/outbox", ActorController, :outbox
     post "/:id/inbox", InboxController, :actor_inbox
+  end
+
+  # Legacy Pleroma-style actor paths for identities imported from a
+  # retired instance. These only resolve when a local identity actually
+  # advertises the matching `/users/:nickname` URL (see
+  # ActorController.resolve_identity/1) — native users live at
+  # `/actors/<uuid>` and 404 here. The inbox derives its target from the
+  # activity body, so it reuses the same handler as the actor inbox.
+  scope "/users", HybridsocialWeb.Federation do
+    pipe_through :federation
+
+    get "/:nickname", ActorController, :show
+    get "/:nickname/followers", ActorController, :followers
+    get "/:nickname/following", ActorController, :following
+    get "/:nickname/collections/featured", ActorController, :featured
+    get "/:nickname/outbox", ActorController, :outbox
+    post "/:nickname/inbox", InboxController, :actor_inbox
   end
 
   scope "/", HybridsocialWeb.Federation do

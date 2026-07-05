@@ -151,7 +151,7 @@
 </script>
 
 <svelte:head>
-  <title>New Message - HybridSocial</title>
+  <title>New Message - Bassam Social</title>
 </svelte:head>
 
 <div class="new-message-page">

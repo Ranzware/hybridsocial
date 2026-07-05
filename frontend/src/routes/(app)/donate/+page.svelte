@@ -44,7 +44,7 @@
 </script>
 
 <svelte:head>
-  <title>Support this instance - HybridSocial</title>
+  <title>Support this instance - Bassam Social</title>
 </svelte:head>
 
 <div class="donate-page">
@@ -259,7 +259,7 @@
 
   .goal-bar-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--color-primary), #0d9488);
+    background: linear-gradient(90deg, var(--color-primary), #6c3edd);
     border-radius: var(--radius-full);
     transition: width 0.5s ease;
   }

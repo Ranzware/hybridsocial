@@ -12,7 +12,8 @@ FROM caddy:${CADDY_VERSION}-builder AS builder
 ENV GOTOOLCHAIN=auto
 RUN xcaddy build \
     --with github.com/corazawaf/coraza-caddy/v2 \
-    --with github.com/hslatman/caddy-crowdsec-bouncer/http
+    --with github.com/hslatman/caddy-crowdsec-bouncer/http \
+    --with github.com/WeidiDeng/caddy-cloudflare-ip
 
 FROM caddy:${CADDY_VERSION}-alpine
 ARG CRS_VERSION

@@ -34,7 +34,9 @@
   onMount(async () => {
     try {
       filters = await api.get<ContentFilter[]>('/api/v1/accounts/filters');
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your filters', 'error');
+    }
     finally { loading = false; }
   });
 
@@ -83,7 +85,6 @@
 </svelte:head>
 
 <div class="filters-page">
-  <h1 class="stitch-title">Content Filters</h1>
   <p class="stitch-desc">Hide or warn about posts containing specific words or phrases.</p>
 
   <!-- Add filter form -->
@@ -96,7 +97,7 @@
       </div>
 
       <div class="stitch-field">
-        <label class="stitch-label">Action</label>
+        <span class="stitch-label">Action</span>
         <div class="action-toggle">
           <button type="button" class="action-opt" class:active={newAction === 'warn'} onclick={() => newAction = 'warn'}>
             <span class="material-symbols-outlined" style="font-size: 16px">warning</span> Warn
@@ -108,7 +109,7 @@
       </div>
 
       <div class="stitch-field">
-        <label class="stitch-label">Apply to</label>
+        <span class="stitch-label">Apply to</span>
         <div class="context-chips">
           {#each allContexts as ctx (ctx.id)}
             <button type="button" class="context-chip" class:active={newContexts.includes(ctx.id)} onclick={() => toggleContext(ctx.id)}>
@@ -166,7 +167,6 @@
 
 <style>
   .filters-page { max-width: 600px; }
-  .stitch-title { font-size: var(--text-2xl); font-weight: 700; margin-block-end: var(--space-2); }
   .stitch-desc { font-size: var(--text-sm); color: var(--color-text-secondary); margin-block-end: var(--space-6); }
 
   .stitch-card {
@@ -183,7 +183,7 @@
   .stitch-field { margin-block-end: var(--space-3); }
   .stitch-label { display: block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); margin-block-end: 6px; }
   .stitch-input { width: 100%; padding: 10px 14px; border: 1px solid var(--color-border); border-radius: 10px; font-size: 0.875rem; color: var(--color-text); background: var(--color-surface); }
-  .stitch-input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(0,128,128,0.1)); }
+  .stitch-input:focus { outline: none; border-color: var(--color-primary); box-shadow: 0 0 0 2px var(--color-primary-soft, rgba(108,62,221,0.1)); }
 
   .action-toggle { display: flex; gap: 8px; }
   .action-opt {
@@ -192,7 +192,7 @@
     background: transparent; color: var(--color-text-secondary); font-size: 0.8125rem; font-weight: 600; cursor: pointer;
     transition: all 150ms ease;
   }
-  .action-opt.active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-soft, rgba(0,128,128,0.05)); }
+  .action-opt.active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-soft, rgba(108,62,221,0.05)); }
 
   .context-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .context-chip {

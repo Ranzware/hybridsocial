@@ -1,5 +1,5 @@
 <svelte:head>
-  <title>Messages - HybridSocial</title>
+  <title>Messages - Bassam Social</title>
 </svelte:head>
 
 <div class="no-selection">

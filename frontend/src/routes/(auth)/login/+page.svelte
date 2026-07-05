@@ -202,7 +202,7 @@
 </script>
 
 <svelte:head>
-  <title>Sign in - HybridSocial</title>
+  <title>Sign in - Bassam Social</title>
 </svelte:head>
 
 <div class="auth-card">
@@ -413,7 +413,7 @@
 
 {#if !otpRequired}
   <div class="auth-info-card">
-    <h3 class="auth-info-title">New to HybridSocial?</h3>
+    <h3 class="auth-info-title">New to Bassam Social?</h3>
     <p class="auth-info-desc">
       Create your own server in minutes or join a community run by others.
     </p>
@@ -716,7 +716,7 @@
 
   .auth-passkey-btn:hover:not(:disabled) {
     border-color: var(--color-primary);
-    background: var(--color-primary-soft, rgba(0, 128, 128, 0.05));
+    background: var(--color-primary-soft, rgba(108, 62, 221, 0.05));
   }
 
   .auth-passkey-btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -763,7 +763,7 @@
     padding: 0 16px; background: #e6e8e9; border: none; border-radius: 10px;
     font-size: 0.875rem; color: #111; margin-bottom: 12px;
   }
-  .passkey-input:focus { outline: none; background: white; box-shadow: 0 0 0 2px rgba(0,128,128,0.2); }
+  .passkey-input:focus { outline: none; background: white; box-shadow: 0 0 0 2px rgba(108,62,221,0.2); }
 
   .passkey-next-btn {
     display: block; width: 100%; height: 46px;
@@ -772,12 +772,12 @@
     font-size: 0.875rem; font-weight: 600; cursor: pointer;
   }
   .passkey-next-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .passkey-next-btn:hover:not(:disabled) { box-shadow: 0 4px 14px rgba(0,128,128,0.25); }
+  .passkey-next-btn:hover:not(:disabled) { box-shadow: 0 4px 14px rgba(108,62,221,0.25); }
 
   .passkey-waiting { display: flex; justify-content: center; margin: 20px 0; }
   .passkey-pulse {
     width: 60px; height: 60px; border-radius: 50%;
-    background: var(--color-primary-soft, rgba(0,128,128,0.1));
+    background: var(--color-primary-soft, rgba(108,62,221,0.1));
     animation: pulse-ring 1.5s ease-in-out infinite;
   }
   @keyframes pulse-ring {

@@ -6,7 +6,11 @@ defmodule Hybridsocial.Accounts.User do
   @foreign_key_type :binary_id
 
   schema "users" do
-    field :email, :string
+    # Email is encrypted at rest; `email_hash` is a deterministic blind
+    # index (keyed HMAC) that carries uniqueness + login lookups, since the
+    # randomized ciphertext can't be searched or unique-constrained.
+    field :email, Hybridsocial.Crypto.EncryptedBinary, context: "user.email"
+    field :email_hash, :string
     field :password_hash, :string
     field :locale, :string, default: "en"
     field :timezone, :string
@@ -18,7 +22,7 @@ defmodule Hybridsocial.Accounts.User do
     field :confirmation_sent_at, :utc_datetime_usec
     field :reset_token, :string
     field :reset_token_at, :utc_datetime_usec
-    field :otp_secret, :string
+    field :otp_secret, Hybridsocial.Crypto.EncryptedBinary, context: "user.otp_secret"
     field :otp_enabled, :boolean, default: false
     field :recovery_codes_hash, :string
     field :approved_at, :utc_datetime_usec
@@ -88,8 +92,20 @@ defmodule Hybridsocial.Accounts.User do
     changeset
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+\.[^\s]+$/, message: "must be a valid email")
     |> validate_length(:email, max: 254)
-    |> unique_constraint(:email)
     |> update_change(:email, &String.downcase/1)
+    |> put_email_hash()
+    |> unique_constraint(:email_hash, name: :users_email_hash_index)
+  end
+
+  # Blind index of the (normalized) email — the searchable/unique key.
+  defp put_email_hash(changeset) do
+    case fetch_field(changeset, :email) do
+      {_, email} when is_binary(email) ->
+        put_change(changeset, :email_hash, Hybridsocial.Crypto.blind_index(email, "user.email"))
+
+      _ ->
+        changeset
+    end
   end
 
   defp validate_password(changeset) do

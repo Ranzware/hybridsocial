@@ -89,10 +89,6 @@
 </script>
 
 <div class="stitch-settings">
-  <div class="stitch-settings-header">
-    <h1 class="stitch-settings-title">Account Migration</h1>
-    <p class="stitch-settings-subtitle">Move your account to or from another instance</p>
-  </div>
 
   <!-- Aliases -->
   <section class="stitch-section">
@@ -232,25 +228,6 @@
 <style>
   .stitch-settings {
     max-width: 720px;
-  }
-
-  .stitch-settings-header {
-    margin-block-end: 32px;
-  }
-
-  .stitch-settings-title {
-    font-family: 'Manrope', var(--font-sans);
-    font-size: 1.875rem;
-    font-weight: 800;
-    letter-spacing: -0.025em;
-    color: var(--color-text);
-    margin: 0;
-  }
-
-  .stitch-settings-subtitle {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-block-start: 4px;
   }
 
   .stitch-section {
@@ -484,10 +461,6 @@
   }
 
   @media (max-width: 640px) {
-    .stitch-settings-title {
-      font-size: 1.5rem;
-    }
-
     .stitch-form {
       padding: 20px;
     }

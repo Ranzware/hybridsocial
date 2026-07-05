@@ -326,8 +326,8 @@
     width: 100%;
   }
 
-  .role-card:hover { border-color: var(--color-primary-soft, rgba(0,128,128,0.3)); }
-  .role-card.active { border-color: var(--color-primary); background: var(--color-primary-soft, rgba(0,128,128,0.06)); }
+  .role-card:hover { border-color: var(--color-primary-soft, rgba(108,62,221,0.3)); }
+  .role-card.active { border-color: var(--color-primary); background: var(--color-primary-soft, rgba(108,62,221,0.06)); }
 
   .role-indicator {
     width: 4px;
@@ -432,7 +432,7 @@
   }
 
   .perm-row:hover { background: var(--color-surface-container-low, #f5f5f5); }
-  .perm-row.checked { background: var(--color-primary-soft, rgba(0,128,128,0.04)); }
+  .perm-row.checked { background: var(--color-primary-soft, rgba(108,62,221,0.04)); }
 
   .perm-row input[type='checkbox'] {
     margin-block-start: 2px;

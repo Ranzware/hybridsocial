@@ -95,6 +95,7 @@ defmodule Hybridsocial.Feeds.Algorithm do
       Post
       |> where([p], p.identity_id in ^followed_ids)
       |> where([p], is_nil(p.deleted_at))
+      |> where([p], not is_nil(p.published_at))
       |> where([p], is_nil(p.parent_id))
       |> where([p], p.inserted_at >= ^cutoff)
       |> apply_post_cursor(cursor)
@@ -109,6 +110,7 @@ defmodule Hybridsocial.Feeds.Algorithm do
       Post
       |> where([p], p.visibility == "public")
       |> where([p], is_nil(p.deleted_at))
+      |> where([p], not is_nil(p.published_at))
       |> where([p], p.inserted_at >= ^cutoff)
       |> where([p], p.identity_id not in ^followed_ids)
       |> where([p], p.reaction_count >= 1 or p.boost_count >= 1)

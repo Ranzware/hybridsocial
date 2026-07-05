@@ -2,8 +2,9 @@
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
   import { authStore, setUser } from '$lib/stores/auth.js';
-  import { updateAccount } from '$lib/api/accounts.js';
+  import { updateAccount, getAccount } from '$lib/api/accounts.js';
   import { api } from '$lib/api/client.js';
+  import { addToast } from '$lib/stores/toast.js';
   import { preferencesStore, updatePreferences } from '$lib/stores/preferences.js';
   import Toggle from '$lib/components/ui/Toggle.svelte';
   import Spinner from '$lib/components/ui/Spinner.svelte';
@@ -25,8 +26,6 @@
   let defaultVisibility = $state<string>('public');
   let autoLoadRemoteMedia = $state(true);
   let saving = $state(false);
-  let saved = $state(false);
-  let error: string | null = $state(null);
 
   // Media preference is local-only — flushes to localStorage on
   // every change, takes effect immediately on every visible
@@ -53,20 +52,39 @@
     // Media auto-load preference (localStorage)
     autoLoadRemoteMedia = isAutoLoadRemoteMedia();
 
+    // Refresh the account-level flags from the server so a stale cached
+    // snapshot doesn't misrepresent (or silently re-save) the wrong
+    // values. `also_known_as` / invite prefs aren't serialised here, so
+    // those stay as the cached values.
+    const uid = state.user?.id;
+    if (uid) {
+      try {
+        const fresh = await getAccount(uid);
+        isLocked = fresh.is_locked ?? isLocked;
+        discoverable = (fresh as any).discoverable ?? discoverable;
+        allowUnfurl = (fresh as any).allow_unfurl ?? allowUnfurl;
+        hideFollowCounts = fresh.hide_follow_counts ?? hideFollowCounts;
+      } catch {
+        // Keep cached values.
+      }
+    }
+
     try {
       const dmPrefs = await api.get<any>('/api/v1/dm_preferences');
       dmPreference = dmPrefs.allow_dms_from || 'everyone';
       groupDmOptIn = dmPrefs.allow_group_dms ?? false;
     } catch {
-      // Use defaults
+      // Fall back to defaults, but tell the user we couldn't load their
+      // saved message settings so a failed fetch isn't mistaken for
+      // "everyone can DM me".
+      addToast('Could not load your message settings', 'error');
     }
     loaded = true;
   });
 
   async function handleSave() {
+    if (saving) return;
     saving = true;
-    error = null;
-    saved = false;
     try {
       const updated = await updateAccount({
         is_locked: isLocked,
@@ -86,10 +104,9 @@
       // Save default visibility (syncs to server automatically)
       updatePreferences({ default_visibility: defaultVisibility as any });
 
-      saved = true;
-      setTimeout(() => { saved = false; }, 3000);
+      addToast('Privacy settings saved', 'success');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to save';
+      addToast(e instanceof Error ? e.message : 'Failed to save privacy settings', 'error');
     } finally {
       saving = false;
     }
@@ -249,14 +266,6 @@
       <span class="form-hint">New posts will default to this visibility setting</span>
     </div>
 
-    {#if error}
-      <div class="form-error">{error}</div>
-    {/if}
-
-    {#if saved}
-      <div class="form-success">Privacy settings saved</div>
-    {/if}
-
     <div class="form-actions">
       <button class="btn btn-primary" type="submit" disabled={saving}>
         {#if saving}
@@ -387,22 +396,6 @@
   .form-hint {
     font-size: var(--text-xs);
     color: var(--color-text-tertiary);
-  }
-
-  .form-error {
-    padding: var(--space-3);
-    background: var(--color-danger-soft);
-    color: var(--color-danger);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
-  }
-
-  .form-success {
-    padding: var(--space-3);
-    background: var(--color-success-soft);
-    color: var(--color-success);
-    border-radius: var(--radius-md);
-    font-size: var(--text-sm);
   }
 
   .form-actions {

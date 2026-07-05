@@ -18,20 +18,30 @@ export function createConversation(recipientIds: string[]): Promise<Conversation
   return api.post('/api/v1/conversations', { recipient_ids: recipientIds });
 }
 
+// The messages endpoint is offset-paginated and returns a bare array
+// (newest-first). We translate the caller's opaque `cursor` to/from an
+// offset and synthesize `next_cursor` from page fullness, so the view's
+// cursor-based load-older logic works. PAGE must equal the server's
+// max_limit (40) — a smaller value would make a full page look partial.
+const MESSAGES_PAGE = 40;
+
 export async function getMessages(
   conversationId: string,
   cursor?: string,
 ): Promise<PaginatedResponse<Message>> {
-  const params: Record<string, string> = {};
-  if (cursor) params.cursor = cursor;
+  const offset = cursor ? parseInt(cursor, 10) || 0 : 0;
+  const params: Record<string, string> = {
+    limit: String(MESSAGES_PAGE),
+    offset: String(offset),
+  };
   const raw = await api.get<Message[] | PaginatedResponse<Message>>(
     `/api/v1/conversations/${conversationId}/messages`,
     params,
   );
-  if (Array.isArray(raw)) {
-    return { data: raw, next_cursor: null, prev_cursor: null };
-  }
-  return raw;
+  const data = Array.isArray(raw) ? raw : raw.data;
+  // A full page means more history likely exists; a short page is the end.
+  const next_cursor = data.length === MESSAGES_PAGE ? String(offset + data.length) : null;
+  return { data, next_cursor, prev_cursor: null };
 }
 
 export function sendMessage(conversationId: string, data: {
@@ -44,6 +54,11 @@ export function sendMessage(conversationId: string, data: {
 
 export function markConversationRead(id: string): Promise<void> {
   return api.post(`/api/v1/conversations/${id}/read`);
+}
+
+/** Fire-and-forget "I'm typing" ping to the other participants. */
+export function sendTyping(id: string): Promise<void> {
+  return api.post(`/api/v1/conversations/${id}/typing`);
 }
 
 export function deleteConversation(id: string): Promise<void> {

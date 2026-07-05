@@ -33,7 +33,7 @@
 </script>
 
 <svelte:head>
-  <title>Directory — HybridSocial</title>
+  <title>Directory — Bassam Social</title>
 </svelte:head>
 
 <div class="directory-page">

@@ -733,9 +733,16 @@ defmodule Hybridsocial.Federation.ActivityBuilder do
     "#{base_url()}/activities/#{actor_uuid}/#{action}/#{target_uuid}/#{timestamp}"
   end
 
-  defp actor_url(identity) do
-    "#{base_url()}/actors/#{identity.id}"
-  end
+  # The `actor` field of every outgoing activity. Must be the identity's
+  # canonical ActivityPub URL — for imported legacy actors that's their
+  # stored `ap_actor_url` (e.g. .../users/nickname), not the computed
+  # `/actors/<uuid>` form. If it were the computed form, a remote would
+  # fetch that URL, find an actor whose `id` differs, and silently drop
+  # the activity (signature still verifies, but the follow/post never
+  # lands). Native identities store the computed form, so this is
+  # unchanged for them.
+  defp actor_url(%{ap_actor_url: url}) when is_binary(url) and url != "", do: url
+  defp actor_url(identity), do: "#{base_url()}/actors/#{identity.id}"
 
   # AP-addressable URL for an identity. For remote identities use the
   # cached `ap_actor_url` so when we address (e.g.) a Like to the post
