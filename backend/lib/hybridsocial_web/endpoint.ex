@@ -66,6 +66,7 @@ defmodule HybridsocialWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+  plug HybridsocialWeb.Plugs.TrustedProxies
   plug HybridsocialWeb.Plugs.SecurityHeaders
 
   plug :cors_plug

@@ -136,6 +136,15 @@ if config_env() == :prod do
   # CORS origins for production
   config :hybridsocial, :cors_origins, [System.get_env("FRONTEND_URL", "https://#{host}")]
 
+  # Trusted proxy CIDRs — the reverse proxy(s) in front of this app.
+  # The TrustedProxies plug only honors X-Forwarded-For when the TCP
+  # peer is in one of these ranges, preventing client-side IP spoofing.
+  # Default: loopback (app + proxy on the same host). For a separate
+  # proxy host, set this to its IP range (e.g. ["10.0.0.0/8"]).
+  if trusted = System.get_env("TRUSTED_PROXIES") do
+    config :hybridsocial, :trusted_proxies, String.split(trusted, ",", trim: true)
+  end
+
   # Email - check for Resend first, fall back to SMTP
   if resend_key = System.get_env("RESEND_API_KEY") do
     config :hybridsocial, Hybridsocial.Mailer,

@@ -256,8 +256,16 @@ defmodule Hybridsocial.Auth.OAuth do
   end
 
   defp do_revoke_token(oauth_token) do
-    oauth_token
-    |> OAuthToken.revoke_changeset()
-    |> Repo.update()
+    result =
+      oauth_token
+      |> OAuthToken.revoke_changeset()
+      |> Repo.update()
+
+    case result do
+      {:ok, _} -> Hybridsocial.Cache.TokenCache.cache_token_revoked(oauth_token.token_hash)
+      _ -> :ok
+    end
+
+    result
   end
 end

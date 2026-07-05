@@ -385,21 +385,7 @@ defmodule HybridsocialWeb.MediaProxyController do
   end
 
   defp validate_remote_url(url) do
-    uri = URI.parse(url)
-
-    cond do
-      uri.scheme not in ["http", "https"] ->
-        {:error, :invalid_url}
-
-      is_nil(uri.host) or uri.host == "" ->
-        {:error, :invalid_url}
-
-      private_host?(uri.host) ->
-        {:error, :private_host}
-
-      true ->
-        :ok
-    end
+    Hybridsocial.Security.UrlValidator.validate(url)
   end
 
   defp sanitize_content_type(content_type) when is_binary(content_type) do
@@ -413,11 +399,4 @@ defmodule HybridsocialWeb.MediaProxyController do
   end
 
   defp sanitize_content_type(_), do: "application/octet-stream"
-
-  defp private_host?(host) do
-    host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"] or
-      String.starts_with?(host, "10.") or
-      String.starts_with?(host, "192.168.") or
-      Regex.match?(~r/^172\.(1[6-9]|2[0-9]|3[01])\./, host)
-  end
 end

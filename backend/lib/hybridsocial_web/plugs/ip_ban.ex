@@ -23,9 +23,9 @@ defmodule HybridsocialWeb.Plugs.IpBan do
   end
 
   defp get_client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [ip | _] -> ip |> String.split(",") |> hd() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
+    # TrustedProxies plug (in the endpoint) already resolved the real
+    # client IP into conn.remote_ip — use it directly, never the raw
+    # XFF header which is client-spoofable.
+    conn.remote_ip |> :inet.ntoa() |> to_string()
   end
 end

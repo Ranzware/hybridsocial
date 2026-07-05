@@ -16,9 +16,10 @@ defmodule HybridsocialWeb.Plugs.Auth do
 
     with {:ok, token} <- extract_token(conn),
          {:ok, claims} <- Token.verify_access_token(token),
+         token_hash <- Token.hash_token(token),
+         :ok <- check_not_revoked(token_hash),
          identity when not is_nil(identity) <- fetch_identity(claims["sub"]) do
       # Update last activity (async, throttled via cache)
-      token_hash = Token.hash_token(token)
       maybe_touch_session(token_hash, conn)
 
       conn
@@ -27,6 +28,53 @@ defmodule HybridsocialWeb.Plugs.Auth do
     else
       _ ->
         conn
+    end
+  end
+
+  # Check that the access token hasn't been revoked server-side. JWT
+  # expiry alone doesn't cover logout / revoke_other_sessions — without
+  # this check a logged-out token stays valid for up to its 7-day TTL.
+  # Uses a short-lived Valkey cache (30 s for active tokens) to avoid
+  # a DB lookup on every request; revoked tokens are cached for 1 h.
+  defp check_not_revoked(token_hash) do
+    case TokenCache.token_status(token_hash) do
+      :active ->
+        :ok
+
+      :revoked ->
+        {:error, :revoked}
+
+      :unknown ->
+        case lookup_token_revocation(token_hash) do
+          {:ok, :active} ->
+            TokenCache.cache_token_active(token_hash)
+            :ok
+
+          {:ok, :revoked} ->
+            TokenCache.cache_token_revoked(token_hash)
+            {:error, :revoked}
+
+          :not_found ->
+            TokenCache.cache_token_revoked(token_hash)
+            {:error, :revoked}
+        end
+    end
+  end
+
+  defp lookup_token_revocation(token_hash) do
+    alias Hybridsocial.Auth.OAuthToken
+    alias Hybridsocial.Repo
+    import Ecto.Query
+
+    OAuthToken
+    |> where([t], t.token_hash == ^token_hash)
+    |> select([t], {t.id, t.revoked_at})
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> :not_found
+      {_id, nil} -> {:ok, :active}
+      {_id, _revoked_at} -> {:ok, :revoked}
     end
   end
 
@@ -61,10 +109,10 @@ defmodule HybridsocialWeb.Plugs.Auth do
   end
 
   defp get_client_ip(conn) do
-    case get_req_header(conn, "x-forwarded-for") do
-      [ip | _] -> ip |> String.split(",") |> hd() |> String.trim()
-      [] -> conn.remote_ip |> :inet.ntoa() |> to_string()
-    end
+    # TrustedProxies plug (in the endpoint) already resolved the real
+    # client IP into conn.remote_ip — use it directly, never the raw
+    # XFF header which is client-spoofable.
+    conn.remote_ip |> :inet.ntoa() |> to_string()
   end
 
   defp safe_cache_raw_get(key) do

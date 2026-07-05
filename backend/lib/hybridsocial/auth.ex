@@ -7,6 +7,7 @@ defmodule Hybridsocial.Auth do
   alias Hybridsocial.Accounts.User
   alias Hybridsocial.Auth.Token
   alias Hybridsocial.Auth.OAuthToken
+  alias Hybridsocial.Cache.TokenCache
 
   import Ecto.Query
 
@@ -204,6 +205,19 @@ defmodule Hybridsocial.Auth do
   def revoke_other_sessions(identity_id, current_token) do
     current_hash = Token.hash_token(current_token)
 
+    # Fetch the hashes of tokens that will be revoked, so we can
+    # proactively mark them as revoked in the token-status cache.
+    hashes =
+      OAuthToken
+      |> where(
+        [t],
+        t.identity_id == ^identity_id and
+          is_nil(t.revoked_at) and
+          t.token_hash != ^current_hash
+      )
+      |> select([t], t.token_hash)
+      |> Repo.all()
+
     {count, _} =
       OAuthToken
       |> where(
@@ -213,6 +227,8 @@ defmodule Hybridsocial.Auth do
           t.token_hash != ^current_hash
       )
       |> Repo.update_all(set: [revoked_at: DateTime.utc_now()])
+
+    Enum.each(hashes, &TokenCache.cache_token_revoked/1)
 
     {:ok, count}
   end
@@ -410,9 +426,17 @@ defmodule Hybridsocial.Auth do
   end
 
   defp revoke_token(oauth_token) do
-    oauth_token
-    |> OAuthToken.revoke_changeset()
-    |> Repo.update()
+    result =
+      oauth_token
+      |> OAuthToken.revoke_changeset()
+      |> Repo.update()
+
+    case result do
+      {:ok, _} -> TokenCache.cache_token_revoked(oauth_token.token_hash)
+      _ -> :ok
+    end
+
+    result
   end
 
   @doc false

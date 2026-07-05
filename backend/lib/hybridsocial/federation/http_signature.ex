@@ -100,6 +100,12 @@ defmodule Hybridsocial.Federation.HTTPSignature do
          {:ok, _} <- verify_signature(conn, sig_params, public_key_pem) do
       {:ok, sig_params["keyId"]}
     end
+  rescue
+    # Malformed signature header, bad base64, or corrupt PEM key —
+    # any of these raise from the verify path. Return a clean 401
+    # instead of letting a 500 leak through to the inbox controller.
+    _exception ->
+      {:error, :signature_invalid}
   end
 
   # Date-header freshness gate. Closes the unbounded replay-attack
@@ -217,47 +223,41 @@ defmodule Hybridsocial.Federation.HTTPSignature do
   defp fetch_public_key(key_id) do
     actor_url = key_id |> String.split("#") |> List.first()
 
-    uri = URI.parse(actor_url)
-    host = uri.host || ""
+    # Reject requests to private/internal hosts to prevent SSRF.
+    # Uses the central UrlValidator which covers IPv4, IPv6, IPv4-mapped,
+    # decimal/octal IP literals, and cloud-metadata endpoints.
+    case Hybridsocial.Security.UrlValidator.validate(actor_url) do
+      :ok ->
+        # INTENTIONALLY UNSIGNED. This fetch retrieves a remote actor's
+        # public key so we can verify their signature. Signing it would
+        # require them to fetch our key to verify, which would (with their
+        # own secure-mode) require them to verify our fetch — and so on.
+        # Key-discovery GETs are unsigned by convention across the fediverse.
+        headers = [
+          {"Accept", "application/activity+json"}
+        ]
 
-    # Reject requests to private/internal hosts to prevent SSRF
-    if private_host?(host) do
-      {:error, :private_host}
-    else
-      # INTENTIONALLY UNSIGNED. This fetch retrieves a remote actor's
-      # public key so we can verify their signature. Signing it would
-      # require them to fetch our key to verify, which would (with their
-      # own secure-mode) require them to verify our fetch — and so on.
-      # Key-discovery GETs are unsigned by convention across the fediverse.
-      headers = [
-        {"Accept", "application/activity+json"}
-      ]
+        case HTTPoison.get(actor_url, headers,
+               timeout: 5_000,
+               recv_timeout: 5_000,
+               max_body_length: 100_000
+             ) do
+          {:ok, %{status_code: 200, body: body}} ->
+            case Jason.decode(body) do
+              {:ok, %{"publicKey" => %{"publicKeyPem" => pem}}} ->
+                {:ok, pem}
 
-      case HTTPoison.get(actor_url, headers,
-             timeout: 5_000,
-             recv_timeout: 5_000,
-             max_body_length: 100_000
-           ) do
-        {:ok, %{status_code: 200, body: body}} ->
-          case Jason.decode(body) do
-            {:ok, %{"publicKey" => %{"publicKeyPem" => pem}}} ->
-              {:ok, pem}
+              _ ->
+                {:error, :invalid_actor}
+            end
 
-            _ ->
-              {:error, :invalid_actor}
-          end
+          _ ->
+            {:error, :fetch_failed}
+        end
 
-        _ ->
-          {:error, :fetch_failed}
-      end
+      {:error, _reason} ->
+        {:error, :private_host}
     end
-  end
-
-  defp private_host?(host) do
-    host in ["localhost", "127.0.0.1", "::1", "0.0.0.0"] or
-      String.starts_with?(host, "10.") or
-      String.starts_with?(host, "192.168.") or
-      Regex.match?(~r/^172\.(1[6-9]|2[0-9]|3[01])\./, host)
   end
 
   defp verify_signature(conn, sig_params, public_key_pem) do

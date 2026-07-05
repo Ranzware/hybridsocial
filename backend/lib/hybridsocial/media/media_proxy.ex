@@ -65,7 +65,8 @@ defmodule Hybridsocial.Media.MediaProxy do
   end
 
   defp secret_key do
-    Application.get_env(:hybridsocial, :secret_key_base, "default-secret-change-me")
+    Application.get_env(:hybridsocial, :secret_key_base) ||
+      raise "media proxy: secret_key_base is not configured — refusing to sign with a default key"
   end
 
   defp local_url?(url) do
