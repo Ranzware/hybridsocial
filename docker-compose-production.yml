@@ -259,7 +259,11 @@ services:
       - crowdsec_config:/etc/crowdsec
       - ./crowdsec/acquis.yaml:/etc/crowdsec/acquis.yaml:ro,z
       - ./crowdsec/profiles.yaml:/etc/crowdsec/profiles.yaml:ro,z
-      - ./crowdsec/notifications/email.yaml:/etc/crowdsec/notifications/email.yaml:ro,z
+      # Email digest notifier — disabled until SMTP is configured. The
+      # plugin broker loads every file in notifications/, so an unwired
+      # (templated) config crashes crowdsec at boot. Re-add this mount +
+      # the profiles.yaml notifications block once SMTP_* are set.
+      # - ./crowdsec/notifications/email.yaml:/etc/crowdsec/notifications/email.yaml:ro,z
     healthcheck:
       test: ["CMD", "cscli", "lapi", "status"]
       interval: 30s
