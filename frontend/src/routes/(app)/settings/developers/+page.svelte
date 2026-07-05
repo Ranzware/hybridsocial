@@ -96,7 +96,9 @@
       ]);
       bots = botsResult;
       personalApps = appsResult;
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your apps and bots', 'error');
+    }
     finally { loading = false; }
   });
 
@@ -190,14 +192,23 @@
         regeneratedKeys = { id, type, keys: result };
         bots = await api.get<BotEntry[]>('/api/v1/bots');
       } else {
-        // For personal apps, delete and recreate
+        // Personal apps have no regenerate endpoint, so a "regenerate"
+        // is really a replace. Create the replacement FIRST — if that
+        // fails, the existing app + token are left untouched (no data
+        // loss). Only then remove the old app.
         const app = personalApps.find(a => a.id === id);
         if (app) {
-          await api.delete(`/api/v1/apps/${id}`);
           const result = await api.post<{ app: PersonalApp; access_token: string; client_secret?: string }>('/api/v1/apps/with_token', {
             name: app.name,
             scopes: app.scopes,
           });
+          try {
+            await api.delete(`/api/v1/apps/${id}`);
+          } catch {
+            // New keys are live; a stale duplicate is recoverable, lost
+            // access is not — so keep going and warn.
+            addToast('New keys created, but the old app could not be removed. Delete it manually below.', 'error');
+          }
           regeneratedKeys = {
             id: result.app.id,
             type: 'personal',

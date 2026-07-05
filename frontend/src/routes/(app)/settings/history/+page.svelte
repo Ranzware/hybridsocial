@@ -73,7 +73,6 @@
 <section class="history-page">
   <header class="history-header">
     <div>
-      <h1>History</h1>
       <p class="history-sub">
         Posts you've interacted with in the last 24 hours — by
         reacting, replying, or opening them. Stored in your browser
@@ -155,12 +154,6 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space-4);
-  }
-
-  .history-header h1 {
-    font-size: var(--text-xl);
-    font-weight: 700;
-    margin: 0 0 var(--space-1) 0;
   }
 
   .history-sub {

@@ -185,11 +185,11 @@
           onclick={openAvatar}
           aria-label="View profile picture"
         >
-          <Avatar src={account.avatar_url} name={account.display_name || account.handle} size="xl" />
+          <Avatar src={account.avatar_url} name={account.display_name || account.handle} size="2xl" />
         </button>
       {:else}
         <div class="profile-avatar-wrapper">
-          <Avatar src={account.avatar_url} name={account.display_name || account.handle} size="xl" />
+          <Avatar src={account.avatar_url} name={account.display_name || account.handle} size="2xl" />
         </div>
       {/if}
 
@@ -454,7 +454,9 @@
     display: flex;
     align-items: flex-end;
     justify-content: space-between;
-    margin-block-start: -52px;
+    /* Avatar wrapper is 104px + 8px ring = 112px; -56 straddles the
+       banner seam at exactly 50% so it reads as anchored to the edge. */
+    margin-block-start: -56px;
   }
 
   /* Ring + drop shadow lift the avatar off the banner. The inner white
@@ -750,7 +752,7 @@
     }
 
     .profile-avatar-row {
-      margin-block-start: -44px;
+      margin-block-start: -52px;
     }
 
     .profile-display-name {

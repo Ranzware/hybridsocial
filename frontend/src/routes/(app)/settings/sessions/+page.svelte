@@ -4,11 +4,15 @@
   import { getSessions, revokeSession, revokeOtherSessions } from '$lib/api/sessions.js';
   import type { Session } from '$lib/api/sessions.js';
   import Spinner from '$lib/components/ui/Spinner.svelte';
+  import Modal from '$lib/components/ui/Modal.svelte';
 
   let sessions: Session[] = $state([]);
   let loading = $state(true);
-  let revokingId: string | null = $state(null);
-  let revokingAll = $state(false);
+
+  // Revoking a session signs a device out — confirm before doing it.
+  let confirmTarget = $state<{ kind: 'one'; session: Session } | { kind: 'all' } | null>(null);
+  let showConfirm = $state(false);
+  let working = $state(false);
 
   onMount(async () => {
     try {
@@ -20,29 +24,38 @@
     }
   });
 
-  async function handleRevoke(id: string) {
-    revokingId = id;
+  function askRevoke(session: Session) {
+    confirmTarget = { kind: 'one', session };
+    showConfirm = true;
+  }
+
+  function askRevokeOthers() {
+    confirmTarget = { kind: 'all' };
+    showConfirm = true;
+  }
+
+  let otherCount = $derived(sessions.filter((s) => !s.current).length);
+
+  async function executeConfirm() {
+    if (!confirmTarget || working) return;
+    working = true;
     try {
-      await revokeSession(id);
-      sessions = sessions.filter(s => s.id !== id);
-      addToast('Session revoked', 'success');
+      if (confirmTarget.kind === 'one') {
+        const id = confirmTarget.session.id;
+        await revokeSession(id);
+        sessions = sessions.filter((s) => s.id !== id);
+        addToast('Session revoked', 'success');
+      } else {
+        const result = await revokeOtherSessions();
+        sessions = sessions.filter((s) => s.current);
+        addToast(`Revoked ${result.count} other session${result.count === 1 ? '' : 's'}`, 'success');
+      }
+      showConfirm = false;
+      confirmTarget = null;
     } catch {
       addToast('Failed to revoke session', 'error');
     } finally {
-      revokingId = null;
-    }
-  }
-
-  async function handleRevokeOthers() {
-    revokingAll = true;
-    try {
-      const result = await revokeOtherSessions();
-      sessions = sessions.filter(s => s.current);
-      addToast(`Revoked ${result.count} other session${result.count === 1 ? '' : 's'}`, 'success');
-    } catch {
-      addToast('Failed to revoke sessions', 'error');
-    } finally {
-      revokingAll = false;
+      working = false;
     }
   }
 
@@ -60,11 +73,6 @@
 </script>
 
 <div class="stitch-settings">
-  <div class="stitch-settings-header">
-    <h1 class="stitch-settings-title">Active Sessions</h1>
-    <p class="stitch-settings-subtitle">Manage devices logged into your account</p>
-  </div>
-
   <section class="stitch-section">
     <div class="stitch-section-heading">
       <span class="stitch-section-icon" aria-hidden="true">
@@ -120,30 +128,21 @@
                 {#if !session.current}
                   <button
                     class="stitch-session-revoke"
-                    onclick={() => handleRevoke(session.id)}
-                    disabled={revokingId === session.id}
+                    onclick={() => askRevoke(session)}
                   >
-                    {#if revokingId === session.id}
-                      <Spinner size={12} />
-                    {:else}
-                      Revoke
-                    {/if}
+                    Revoke
                   </button>
                 {/if}
               </div>
             {/each}
           </div>
 
-          {#if sessions.length > 1}
+          {#if otherCount > 0}
             <div class="stitch-actions">
               <button
                 class="stitch-btn-danger stitch-btn-sm"
-                onclick={handleRevokeOthers}
-                disabled={revokingAll}
+                onclick={askRevokeOthers}
               >
-                {#if revokingAll}
-                  <Spinner size={14} color="#fff" />
-                {/if}
                 Revoke all other sessions
               </button>
             </div>
@@ -154,28 +153,60 @@
   </section>
 </div>
 
+<Modal
+  bind:open={showConfirm}
+  title={confirmTarget?.kind === 'all' ? 'Revoke all other sessions?' : 'Revoke this session?'}
+  onclose={() => { confirmTarget = null; }}
+>
+  {#if confirmTarget}
+    <p class="confirm-message">
+      {#if confirmTarget.kind === 'all'}
+        This signs out {otherCount} other device{otherCount === 1 ? '' : 's'}. They'll need to log in again. Your current device stays signed in.
+      {:else}
+        <strong>{confirmTarget.session.device_name}</strong> will be signed out and need to log in again.
+      {/if}
+    </p>
+    <div class="confirm-actions">
+      <button type="button" class="stitch-btn-ghost" onclick={() => (showConfirm = false)}>Cancel</button>
+      <button type="button" class="stitch-btn-danger" onclick={executeConfirm} disabled={working}>
+        {#if working}<Spinner size={14} color="#fff" />{/if}
+        Revoke
+      </button>
+    </div>
+  {/if}
+</Modal>
+
 <style>
   .stitch-settings {
     max-width: 720px;
   }
 
-  .stitch-settings-header {
-    margin-block-end: 32px;
+  .confirm-message {
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    margin-block-end: var(--space-4);
   }
 
-  .stitch-settings-title {
-    font-family: 'Manrope', var(--font-sans);
-    font-size: 1.875rem;
-    font-weight: 800;
-    letter-spacing: -0.025em;
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+  }
+
+  .stitch-btn-ghost {
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
     color: var(--color-text);
-    margin: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
   }
 
-  .stitch-settings-subtitle {
-    font-size: 0.875rem;
-    color: #6b7280;
-    margin-block-start: 4px;
+  .stitch-btn-ghost:hover {
+    background: var(--color-surface-container-low);
   }
 
   .stitch-section {
@@ -358,10 +389,6 @@
   }
 
   @media (max-width: 640px) {
-    .stitch-settings-title {
-      font-size: 1.5rem;
-    }
-
     .stitch-form {
       padding: 20px;
     }

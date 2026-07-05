@@ -37,7 +37,9 @@
   onMount(async () => {
     try {
       addresses = await api.get<CryptoAddr[]>('/api/v1/accounts/crypto_addresses');
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your wallet addresses', 'error');
+    }
     finally { loading = false; }
   });
 
@@ -75,7 +77,6 @@
 </svelte:head>
 
 <div class="donations-page">
-  <h1 class="stitch-title">Crypto Donations</h1>
   <p class="stitch-desc">Add your wallet addresses so people can donate to you. These will appear on your profile.</p>
 
   <div class="stitch-card">
@@ -133,7 +134,6 @@
 
 <style>
   .donations-page { max-width: 600px; }
-  .stitch-title { font-size: var(--text-2xl); font-weight: 700; margin-block-end: var(--space-2); }
   .stitch-desc { font-size: var(--text-sm); color: var(--color-text-secondary); margin-block-end: var(--space-6); }
   .stitch-card { background: var(--color-surface-raised, white); border: 1px solid var(--color-border); border-radius: var(--radius-xl); padding: var(--space-5); margin-block-end: var(--space-4); }
   .stitch-section-title { font-size: var(--text-base); font-weight: 600; margin-block-end: var(--space-4); }

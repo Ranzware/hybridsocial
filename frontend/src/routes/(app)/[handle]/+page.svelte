@@ -285,7 +285,7 @@
   }
 
   function handleEdit() {
-    window.location.href = '/settings';
+    window.location.href = '/settings/profile';
   }
 
   // Show a freshly-posted status on the author's own profile feed
@@ -379,7 +379,7 @@
     <div class="profile-skeleton">
       <Skeleton width="100%" height="210px" />
       <div class="profile-skeleton-info">
-        <Skeleton width="88px" height="88px" rounded />
+        <Skeleton width="104px" height="104px" rounded />
         <Skeleton width="200px" height="24px" />
         <Skeleton width="140px" height="16px" />
         <Skeleton width="100%" height="40px" />

@@ -34,7 +34,9 @@
   onMount(async () => {
     try {
       filters = await api.get<ContentFilter[]>('/api/v1/accounts/filters');
-    } catch { /* */ }
+    } catch {
+      addToast('Could not load your filters', 'error');
+    }
     finally { loading = false; }
   });
 
@@ -83,7 +85,6 @@
 </svelte:head>
 
 <div class="filters-page">
-  <h1 class="stitch-title">Content Filters</h1>
   <p class="stitch-desc">Hide or warn about posts containing specific words or phrases.</p>
 
   <!-- Add filter form -->
@@ -96,7 +97,7 @@
       </div>
 
       <div class="stitch-field">
-        <label class="stitch-label">Action</label>
+        <span class="stitch-label">Action</span>
         <div class="action-toggle">
           <button type="button" class="action-opt" class:active={newAction === 'warn'} onclick={() => newAction = 'warn'}>
             <span class="material-symbols-outlined" style="font-size: 16px">warning</span> Warn
@@ -108,7 +109,7 @@
       </div>
 
       <div class="stitch-field">
-        <label class="stitch-label">Apply to</label>
+        <span class="stitch-label">Apply to</span>
         <div class="context-chips">
           {#each allContexts as ctx (ctx.id)}
             <button type="button" class="context-chip" class:active={newContexts.includes(ctx.id)} onclick={() => toggleContext(ctx.id)}>
@@ -166,7 +167,6 @@
 
 <style>
   .filters-page { max-width: 600px; }
-  .stitch-title { font-size: var(--text-2xl); font-weight: 700; margin-block-end: var(--space-2); }
   .stitch-desc { font-size: var(--text-sm); color: var(--color-text-secondary); margin-block-end: var(--space-6); }
 
   .stitch-card {
